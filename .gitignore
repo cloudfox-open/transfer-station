@@ -1,0 +1,16 @@
+# 依赖目录
+node_modules/
+venv/
+
+# 运行时数据（缩略图缓存、收藏夹、备忘录、生活区照片）—— 含本机隐私，不入库
+.cache/
+.data/
+
+# 系统 / 编辑器
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.log
+npm-debug.log*
