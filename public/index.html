@@ -44,7 +44,13 @@
       <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 11.2v5.6M12 7.9h.01"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="10.5" height="10.5" rx="1.7"/><path d="M15.4 6.2V5.6A1.6 1.6 0 0 0 13.8 4H5.6A1.6 1.6 0 0 0 4 5.6v8.2a1.6 1.6 0 0 0 1.6 1.6h.6"/></symbol>
       <symbol id="i-open-new" viewBox="0 0 24 24"><path d="M14 4.6h5.4V10"/><path d="M19.4 4.6l-7.6 7.6"/><path d="M18 14v4.4a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 18.4V7.6A1.6 1.6 0 0 1 5.6 6H10"/></symbol>
-    </defs>
+      <symbol id="i-cut" viewBox="0 0 24 24"><circle cx="6.4" cy="6.6" r="2.4"/><circle cx="6.4" cy="17.4" r="2.4"/><path d="M8.4 8L20 18.6M8.4 16L20 5.4"/></symbol>
+      <symbol id="i-paste" viewBox="0 0 24 24"><path d="M9 4.8h6a1 1 0 0 1 1 1v1.2H8V5.8a1 1 0 0 1 1-1z"/><path d="M8 6H6.6A1.6 1.6 0 0 0 5 7.6v11.8A1.6 1.6 0 0 0 6.6 21h10.8a1.6 1.6 0 0 0 1.6-1.6V7.6A1.6 1.6 0 0 0 17.4 6H16"/><path d="M8.6 13.6h6.8M8.6 17h4.4"/></symbol>
+      <symbol id="i-link" viewBox="0 0 24 24"><path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l2.9-2.9a3.6 3.6 0 0 0-5.1-5.1l-1 1"/><path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-2.9 2.9a3.6 3.6 0 0 0 5.1 5.1l1-1"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M8.4 6.6L4 11l4.4 4.4"/><path d="M4 11h10.4a5.2 5.2 0 0 1 0 10.4H11"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l4.8 4.8L19.5 6.9"/></symbol>
+      <symbol id="i-restore" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4.5V10h5.5"/></symbol>
+</defs>
   </svg>
 
   <!-- ===================== 标题栏 ===================== -->
@@ -105,6 +111,9 @@
       <button class="cmd-btn icon-only" id="fab-btn" onclick="toggleMenu()" title="更多"><svg class="gi"><use href="#i-more"/></svg></button>
 
       <div class="fab-menu" id="fab-menu">
+        <div class="menu-item" id="undo-menu-item" onclick="undoLast()" title="撤销">
+          <svg class="gi menu-icon"><use href="#i-undo"/></svg><span id="undo-menu-label">撤销</span>
+        </div>
         <div class="menu-item" onclick="openThisPC();closeMenu()">
           <svg class="gi menu-icon"><use href="#i-monitor"/></svg><span>此电脑（磁盘）</span>
         </div>
@@ -119,6 +128,12 @@
         </div>
         <div class="menu-item" onclick="triggerUpload();closeMenu()">
           <svg class="gi menu-icon"><use href="#i-upload"/></svg><span>上传文件</span>
+        </div>
+        <div class="menu-item" onclick="triggerFolderUpload();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-folder-plus"/></svg><span>上传文件夹</span>
+        </div>
+        <div class="menu-item" onclick="openTrashPanel();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-trash"/></svg><span>回收站</span>
         </div>
         <div class="menu-item" onclick="downloadZip();closeMenu()">
           <svg class="gi menu-icon"><use href="#i-package"/></svg><span>打包下载</span>
@@ -143,6 +158,7 @@
     <!-- ===================== 地址栏 ===================== -->
     <div class="nav-bar">
       <button class="nav-btn mobile-only" onclick="toggleNavPane()" title="导航窗格"><svg class="gi"><use href="#i-menu"/></svg></button>
+      <button class="nav-btn mobile-only" id="select-mode-btn" onclick="toggleSelectionMode()" title="多选"><svg class="gi"><use href="#i-check"/></svg></button>
       <button class="nav-btn" id="nav-back" onclick="goBack()" title="后退" disabled><svg class="gi"><use href="#i-back"/></svg></button>
       <button class="nav-btn" id="nav-forward" onclick="goForward()" title="前进" disabled><svg class="gi"><use href="#i-forward"/></svg></button>
       <button class="nav-btn" onclick="goUp()" title="上一级"><svg class="gi"><use href="#i-up"/></svg></button>
@@ -157,6 +173,7 @@
       <div class="search-box">
         <span class="search-ico"><svg class="gi"><use href="#i-search"/></svg></span>
         <input type="text" id="search-input" placeholder="搜索">
+        <button class="search-sub-btn" id="search-sub-btn" onclick="toggleSearchRecursive()" title="搜索包含子文件夹">子目录</button>
       </div>
     </div>
   </header>
@@ -180,6 +197,11 @@
       <div class="loading-bar" id="loading-bar" style="display:none">
         <div class="loading-track"><div class="loading-indeterminate"></div></div>
         <span class="loading-text" id="loading-text">正在读取文件夹…</span>
+      </div>
+
+      <div class="search-banner" id="search-banner" style="display:none">
+        <span class="search-banner-text" id="search-banner-text"></span>
+        <button class="search-banner-clear" onclick="exitSearch()">清除搜索</button>
       </div>
 
       <section class="drives-view" id="drives-view" style="display:none">
@@ -232,6 +254,7 @@
   </footer>
 
   <input type="file" id="file-upload" multiple style="display:none" onchange="handleFileSelect(this.files)">
+  <input type="file" id="folder-upload" webkitdirectory directory multiple style="display:none" onchange="handleFolderSelect(this.files)">
 
   <div class="drop-overlay" id="drop-overlay">
     <div class="drop-content">
@@ -242,7 +265,7 @@
 
   <div class="upload-panel" id="upload-panel">
     <div class="upload-header">
-      <span>上传文件</span>
+      <span id="upload-title">上传文件</span>
       <button class="close-btn" onclick="closeUploadPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
     </div>
     <div class="upload-file-list" id="upload-file-list"></div>
@@ -253,8 +276,31 @@
       <span class="upload-progress-text" id="upload-progress-text">0%</span>
     </div>
     <div class="upload-actions">
-      <button class="upload-cancel-btn" onclick="closeUploadPanel()">取消</button>
+      <button class="upload-cancel-btn" id="upload-cancel-btn" onclick="cancelUpload()">取消</button>
       <button class="upload-confirm-btn" id="upload-confirm-btn" onclick="confirmUpload()">开始上传</button>
+    </div>
+  </div>
+
+  <div class="favorites-panel trash-panel" id="trash-panel">
+    <div class="favorites-header">
+      <span><svg class="gi"><use href="#i-trash"/></svg> 回收站</span>
+      <button class="close-btn" onclick="closeTrashPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="trash-list" id="trash-list"></div>
+    <button class="add-favorite-btn trash-empty-btn" onclick="emptyTrashAction()">清空回收站</button>
+  </div>
+
+  <div class="select-bar" id="select-bar">
+    <div class="select-bar-info">
+      <span id="select-count">已选 0 项</span>
+      <button class="select-all-btn" onclick="toggleSelectAllMobile()">全选</button>
+    </div>
+    <div class="select-bar-actions">
+      <button onclick="copySelection()"><svg class="gi"><use href="#i-copy"/></svg><span>复制</span></button>
+      <button onclick="cutSelection()"><svg class="gi"><use href="#i-cut"/></svg><span>剪切</span></button>
+      <button onclick="zipSelectedMobile()"><svg class="gi"><use href="#i-package"/></svg><span>打包</span></button>
+      <button class="danger" onclick="confirmDeleteSelection()"><svg class="gi"><use href="#i-trash"/></svg><span>删除</span></button>
+      <button class="primary" onclick="exitSelectionMode()">完成</button>
     </div>
   </div>
 
@@ -367,6 +413,10 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/browse.js"></script>
+  <script src="js/media.js"></script>
+  <script src="js/panels.js"></script>
+  <script src="js/ops.js"></script>
 </body>
 </html>
