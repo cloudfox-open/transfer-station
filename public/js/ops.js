@@ -58,12 +58,12 @@ function addPendingFiles(files, isFolder) {
   }));
 
   // 超过服务端单文件上限的直接拦下来，不用先传一遍再失败
-  const limit = (serverConfig.maxUploadMB || 2048) * 1024 * 1024;
+  const limit = (serverConfig.maxUploadMB || 102400) * 1024 * 1024;
   const over = all.filter(i => i.file.size > limit);
   const list = all.filter(i => i.file.size <= limit);
 
   if (over.length) {
-    alert(`以下文件超过单文件 ${serverConfig.maxUploadMB} MB 上限，已跳过：\n`
+    alert(`以下文件超过单文件 ${formatFileSize(limit)} 上限，已跳过：\n`
       + over.slice(0, 5).map(i => `· ${i.rel || i.file.name}（${formatFileSize(i.file.size)}）`).join('\n')
       + (over.length > 5 ? `\n…共 ${over.length} 个文件超限` : ''));
   }

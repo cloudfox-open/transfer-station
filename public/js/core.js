@@ -34,7 +34,7 @@ let searchMode = false;
 let searchRecursive = localStorage.getItem(SEARCH_SUB_KEY) === '1';
 
 // 服务端配置（上传上限等），启动时拉取，用于上传前预检
-let serverConfig = { maxUploadMB: 2048, cacheMaxMB: 500 };
+let serverConfig = { maxUploadMB: 102400, cacheMaxMB: 500 };
 
 // 手机端：选择模式（点条目 = 勾选）
 let selectionMode = false;
