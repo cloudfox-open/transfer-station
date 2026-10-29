@@ -290,24 +290,32 @@ function loadThemeColor() {
 }
 
 // =========================================================
-// 自定义界面背景（压缩后保存在本机 localStorage）
+// 自定义界面背景（上传到服务端，所有设备共用）
 // =========================================================
-const BG_KEY = 'bg-image';
-const BG_MAX_SIDE = 1920;
+let bgVersion = 0;
 
-function readSavedBackground() {
-  try { return localStorage.getItem(BG_KEY) || ''; } catch { return ''; }
+function bgUrl(version) {
+  return version ? `/api/background?v=${version}` : '';
 }
 
 function initBackground() {
-  applyBackground(readSavedBackground());
+  // 清掉旧版本存在浏览器里的背景，统一改走服务端
+  try { localStorage.removeItem('bg-image'); } catch { /* 忽略 */ }
+
+  fetch('/api/background/meta')
+    .then(r => (r.ok ? r.json() : { exists: false }))
+    .then(meta => {
+      bgVersion = meta && meta.exists ? meta.version : 0;
+      applyBackground(bgVersion);
+    })
+    .catch(() => applyBackground(0));
 }
 
-function applyBackground(dataUrl) {
+function applyBackground(version) {
   const root = document.documentElement;
-  if (dataUrl) {
+  if (version) {
     document.body.classList.add('has-bg');
-    root.style.setProperty('--bg-image', `url("${dataUrl}")`);
+    root.style.setProperty('--bg-image', `url("${bgUrl(version)}")`);
   } else {
     document.body.classList.remove('has-bg');
     root.style.removeProperty('--bg-image');
@@ -327,10 +335,10 @@ function openBackgroundDialog() {
           <button class="modal-btn primary" onclick="chooseBackground()">选择图片</button>
           <button class="modal-btn" onclick="removeBackground()">恢复默认</button>
         </div>
-        <div class="bg-hint">图片会压缩到最长边 ${BG_MAX_SIDE}px 后保存在本机浏览器（localStorage），不会上传到服务器；切到深色模式会自动加暗色蒙层。</div>
+        <div class="bg-hint">图片会上传到服务器（<code>.data/background.jpg</code>）并压缩到最长边 1920px，所有设备共用；深色模式会自动加暗色蒙层。</div>
       </div>`
   });
-  updateBackgroundPreview(readSavedBackground());
+  updateBackgroundPreview(bgVersion);
 }
 
 function chooseBackground() {
@@ -344,57 +352,36 @@ async function handleBackgroundFile(input) {
   if (!file) return;
   if (!/^image\//.test(file.type)) return alert('请选择图片文件');
 
+  const form = new FormData();
+  form.append('image', file, file.name);
+
   try {
-    const dataUrl = await compressImage(file);
-    try {
-      localStorage.setItem(BG_KEY, dataUrl);
-    } catch {
-      alert('图片处理后仍超出浏览器存储上限，本次会生效，但刷新后可能失效');
-    }
-    applyBackground(dataUrl);
-    updateBackgroundPreview(dataUrl);
-    flashStatus('背景图已更新');
+    const res = await fetch('/api/background', { method: 'POST', body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '上传失败');
+
+    bgVersion = data.version || Date.now();
+    applyBackground(bgVersion);
+    updateBackgroundPreview(bgVersion);
+    flashStatus('背景图已保存到服务器');
   } catch (err) {
     alert('设置背景失败：' + err.message);
   }
 }
 
-function removeBackground() {
-  try { localStorage.removeItem(BG_KEY); } catch { /* 忽略 */ }
-  applyBackground('');
-  updateBackgroundPreview('');
+async function removeBackground() {
+  try { await fetch('/api/background', { method: 'DELETE' }); } catch { /* 忽略 */ }
+  bgVersion = 0;
+  applyBackground(0);
+  updateBackgroundPreview(0);
   flashStatus('已恢复默认背景');
 }
 
-function updateBackgroundPreview(dataUrl) {
+function updateBackgroundPreview(version) {
   const preview = document.getElementById('bg-preview');
   if (!preview) return;
-  preview.classList.toggle('has', !!dataUrl);
-  preview.style.backgroundImage = dataUrl ? `url("${dataUrl}")` : '';
-}
-
-// 等比缩到最长边 1920 再转 JPEG，避免 localStorage 被大图撑爆
-function compressImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('读取图片失败'));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('不支持的图片格式'));
-      img.onload = () => {
-        const scale = Math.min(1, BG_MAX_SIDE / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
+  preview.classList.toggle('has', !!version);
+  preview.style.backgroundImage = version ? `url("${bgUrl(version)}")` : '';
 }
 
 // =========================================================
