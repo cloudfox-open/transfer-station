@@ -18,6 +18,7 @@ require('./routes/meta')(app);
 require('./routes/drives')(app);
 require('./routes/logs')(app);
 require('./routes/scan')(app);
+require('./routes/compare')(app);
 
 // 未匹配的 API 返回 JSON，而不是 Express 默认的 HTML 错误页
 app.use('/api', (req, res) => {

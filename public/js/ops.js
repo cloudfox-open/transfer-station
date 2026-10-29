@@ -942,6 +942,7 @@ function initModal() {
 function showModal(opts) {
   document.getElementById('modal-title').textContent = opts.title || '';
   document.getElementById('modal-body').innerHTML = opts.bodyHtml || '';
+  document.querySelector('#modal-overlay .modal').classList.toggle('wide', !!opts.wide);
 
   const okBtn = document.getElementById('modal-ok');
   const cancelBtn = document.getElementById('modal-cancel');

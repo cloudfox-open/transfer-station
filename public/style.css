@@ -1086,9 +1086,43 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .clean-progress { display: flex; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .clean-progress-text { font-size: 12px; color: var(--primary); line-height: 1.5; }
 .clean-list { flex: 1; overflow-y: auto; padding: 8px 10px; }
+.clean-compare-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--hover);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.clean-compare-actions { display: flex; gap: 6px; }
+.clean-mini-btn {
+  padding: 5px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.clean-mini-btn:hover { background: var(--press); }
+.clean-mini-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.clean-mini-btn.primary:hover { background: var(--primary-hover); }
+.clean-mini-btn:disabled { opacity: .5; cursor: not-allowed; }
+.clean-check {
+  flex-shrink: 0;
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
 .clean-summary { padding: 6px 4px 8px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
 .clean-item {
   position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px 10px;
   margin-bottom: 6px;
   background: var(--card);
@@ -1097,6 +1131,7 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   cursor: pointer;
 }
 .clean-item:hover { border-color: var(--primary); }
+.clean-item-main { flex: 1; min-width: 0; }
 .clean-name { font-size: 12.5px; font-weight: 600; word-break: break-all; padding-right: 66px; }
 .clean-meta { margin-top: 2px; font-size: 11px; color: var(--text-tertiary); word-break: break-all; padding-right: 66px; }
 .clean-item .clean-size { position: absolute; right: 10px; bottom: 8px; color: var(--primary); font-variant-numeric: tabular-nums; }
@@ -1117,8 +1152,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   color: var(--text-secondary);
 }
 .clean-group-head b { color: var(--warning); font-weight: 600; }
-.clean-file { padding: 6px 10px; border-top: 1px solid var(--border); cursor: pointer; }
+.clean-file {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+}
 .clean-file:hover { background: var(--hover); }
+.clean-file-main { flex: 1; min-width: 0; }
 .clean-file-name { display: block; font-size: 12px; word-break: break-all; }
 .clean-file-meta { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-tertiary); word-break: break-all; }
 
@@ -1734,6 +1777,85 @@ body.compact .status-bar { height: 22px; }
 .prop-key { width: 76px; flex-shrink: 0; color: var(--text-tertiary); }
 .prop-val { flex: 1; min-width: 0; word-break: break-all; color: var(--text-primary); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+/* 宽对话框 + 文件对比结果 */
+.modal.wide { width: min(94vw, 720px); }
+.modal.wide .modal-body { max-height: 62vh; overflow-y: auto; }
+.cmp-loading, .cmp-error { padding: 8px 2px; font-size: 12.5px; color: var(--text-secondary); }
+.cmp-error { color: var(--danger); }
+.cmp-verdict {
+  padding: 9px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+}
+.cmp-verdict.same { background: rgba(16, 124, 16, .12); color: #107c10; }
+.cmp-verdict.diff { background: rgba(209, 52, 56, .12); color: var(--danger); }
+.cmp-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .cmp-cards { grid-template-columns: 1fr; } }
+.cmp-card {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+.cmp-label { margin-bottom: 4px; font-size: 11px; color: var(--text-tertiary); }
+.cmp-name { font-size: 13px; font-weight: 600; word-break: break-all; }
+.cmp-path { margin-top: 3px; font-size: 11px; color: var(--text-secondary); word-break: break-all; }
+.cmp-meta { margin-top: 6px; font-size: 11px; color: var(--text-tertiary); }
+.cmp-hash {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+.cmp-diff {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+.cmp-diff b { color: var(--danger); }
+.cmp-hex {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.cmp-hint { margin-top: 10px; font-size: 11px; line-height: 1.5; color: var(--text-tertiary); }
+.cmp-summary { padding: 4px 2px 10px; font-size: 12.5px; color: var(--text-secondary); }
+.cmp-group {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--card);
+}
+.cmp-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--hover);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.cmp-file { padding: 6px 10px; border-top: 1px solid var(--border); }
+.cmp-file-name { display: block; font-size: 12px; word-break: break-all; }
+.cmp-file-dir { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-tertiary); word-break: break-all; }
 .modal-btn {
   padding: 7px 16px;
   font-size: 13px;
@@ -1975,3 +2097,91 @@ body.selection-mode .content { padding-bottom: 84px; }
   .trash-panel .trash-list { padding: 8px; }
   .br-row > span { width: 56px; }
 }
+
+/* =========================================================
+   透明毛玻璃 + 自定义背景
+   ========================================================= */
+:root {
+  --glass-chrome: rgba(255, 255, 255, .64);
+  --glass-soft: rgba(255, 255, 255, .58);
+  --glass-menu: rgba(255, 255, 255, .78);
+  --glass-border: rgba(255, 255, 255, .60);
+  --bg-tint: rgba(255, 255, 255, .45);
+}
+
+[data-theme="dark"] {
+  --glass-chrome: rgba(32, 32, 32, .60);
+  --glass-soft: rgba(40, 40, 40, .55);
+  --glass-menu: rgba(40, 40, 40, .80);
+  --glass-border: rgba(255, 255, 255, .10);
+  --bg-tint: rgba(0, 0, 0, .52);
+}
+
+/* 自定义背景图：先铺一层主题蒙层，避免文字看不清 */
+body.has-bg {
+  background-image: linear-gradient(var(--bg-tint), var(--bg-tint)), var(--bg-image);
+  background-size: cover, cover;
+  background-position: center center, center center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
+}
+
+.explorer-header,
+.nav-pane,
+.titlebar,
+.tabstrip,
+.status-bar {
+  background: var(--glass-chrome);
+  -webkit-backdrop-filter: blur(30px) saturate(170%);
+  backdrop-filter: blur(30px) saturate(170%);
+  border-color: var(--glass-border);
+}
+
+.favorites-panel,
+.memo-panel,
+.photos-panel,
+.log-panel,
+.clean-panel,
+.upload-panel,
+.upload-mini,
+.modal,
+.fab-menu,
+.ctx-menu,
+.memo-editor,
+.select-bar {
+  background: var(--glass-menu);
+  -webkit-backdrop-filter: blur(34px) saturate(175%);
+  backdrop-filter: blur(34px) saturate(175%);
+  border-color: var(--glass-border);
+}
+
+.address-bar,
+.search-box,
+.details-head {
+  background: var(--glass-soft);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+}
+.address-bar:hover,
+.address-bar.editing {
+  background: var(--glass-menu);
+}
+
+/* 背景设置对话框 */
+.bg-dialog { display: flex; flex-direction: column; gap: 12px; }
+.bg-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 190px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface-2);
+  background-size: cover;
+  background-position: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.bg-preview:not(.has)::after { content: '当前使用默认背景'; }
+.bg-actions { display: flex; gap: 8px; }
+.bg-hint { font-size: 11.5px; line-height: 1.6; color: var(--text-tertiary); }

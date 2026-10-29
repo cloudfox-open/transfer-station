@@ -66,6 +66,7 @@ const isTouch = window.matchMedia('(hover: none)').matches;
 window.addEventListener('DOMContentLoaded', () => {
   initTheme();
   loadThemeColor();
+  initBackground();
   initLazyLoad();
   initDragDrop();
   initCompact();
@@ -286,6 +287,114 @@ function setThemeColor(color, el) {
 function loadThemeColor() {
   const saved = localStorage.getItem(COLOR_KEY);
   if (saved) setThemeColor(saved);
+}
+
+// =========================================================
+// 自定义界面背景（压缩后保存在本机 localStorage）
+// =========================================================
+const BG_KEY = 'bg-image';
+const BG_MAX_SIDE = 1920;
+
+function readSavedBackground() {
+  try { return localStorage.getItem(BG_KEY) || ''; } catch { return ''; }
+}
+
+function initBackground() {
+  applyBackground(readSavedBackground());
+}
+
+function applyBackground(dataUrl) {
+  const root = document.documentElement;
+  if (dataUrl) {
+    document.body.classList.add('has-bg');
+    root.style.setProperty('--bg-image', `url("${dataUrl}")`);
+  } else {
+    document.body.classList.remove('has-bg');
+    root.style.removeProperty('--bg-image');
+  }
+}
+
+function openBackgroundDialog() {
+  showModal({
+    title: '界面背景',
+    wide: true,
+    okText: '关闭',
+    hideCancel: true,
+    bodyHtml: `
+      <div class="bg-dialog">
+        <div class="bg-preview" id="bg-preview"></div>
+        <div class="bg-actions">
+          <button class="modal-btn primary" onclick="chooseBackground()">选择图片</button>
+          <button class="modal-btn" onclick="removeBackground()">恢复默认</button>
+        </div>
+        <div class="bg-hint">图片会压缩到最长边 ${BG_MAX_SIDE}px 后保存在本机浏览器（localStorage），不会上传到服务器；切到深色模式会自动加暗色蒙层。</div>
+      </div>`
+  });
+  updateBackgroundPreview(readSavedBackground());
+}
+
+function chooseBackground() {
+  const input = document.getElementById('bg-input');
+  if (input) input.click();
+}
+
+async function handleBackgroundFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!/^image\//.test(file.type)) return alert('请选择图片文件');
+
+  try {
+    const dataUrl = await compressImage(file);
+    try {
+      localStorage.setItem(BG_KEY, dataUrl);
+    } catch {
+      alert('图片处理后仍超出浏览器存储上限，本次会生效，但刷新后可能失效');
+    }
+    applyBackground(dataUrl);
+    updateBackgroundPreview(dataUrl);
+    flashStatus('背景图已更新');
+  } catch (err) {
+    alert('设置背景失败：' + err.message);
+  }
+}
+
+function removeBackground() {
+  try { localStorage.removeItem(BG_KEY); } catch { /* 忽略 */ }
+  applyBackground('');
+  updateBackgroundPreview('');
+  flashStatus('已恢复默认背景');
+}
+
+function updateBackgroundPreview(dataUrl) {
+  const preview = document.getElementById('bg-preview');
+  if (!preview) return;
+  preview.classList.toggle('has', !!dataUrl);
+  preview.style.backgroundImage = dataUrl ? `url("${dataUrl}")` : '';
+}
+
+// 等比缩到最长边 1920 再转 JPEG，避免 localStorage 被大图撑爆
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('不支持的图片格式'));
+      img.onload = () => {
+        const scale = Math.min(1, BG_MAX_SIDE / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // =========================================================

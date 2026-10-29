@@ -385,6 +385,7 @@ function renderOperationLogs(entries) {
 let cleanScanId = null;
 let cleanPollTimer = null;
 let cleanScanning = false;
+const cleanComparePaths = new Set();
 
 function openCleanPanel() {
   document.getElementById('trash-panel').classList.remove('open');
@@ -441,6 +442,7 @@ async function startCleanScan() {
   const progressText = document.getElementById('clean-progress-text');
 
   updateCleanScope();
+  clearCompareSelection();
   list.innerHTML = '';
   progress.style.display = 'flex';
   progressText.textContent = '正在创建扫描任务…';
@@ -543,8 +545,11 @@ function renderCleanResult(job) {
       <div class="clean-summary">找到 ${r.totalCount} 个大文件，共 ${formatFileSize(r.totalBytes)}${r.truncated ? '（已达上限，结果被截断）' : ''}<br>点击条目会打开所在目录并选中该文件</div>
       ${r.files.map(f => `
         <div class="clean-item" title="${escapeHtml(f.path)}" onclick="revealCleanFile('${jsStr(f.path)}')">
-          <div class="clean-name">${escapeHtml(f.name)}</div>
-          <div class="clean-meta">${escapeHtml(parentDirOf(f.path))}</div>
+          ${cleanCheckboxHtml(f.path)}
+          <div class="clean-item-main">
+            <div class="clean-name">${escapeHtml(f.name)}</div>
+            <div class="clean-meta">${escapeHtml(parentDirOf(f.path))}</div>
+          </div>
           <span class="clean-size">${formatFileSize(f.size)}</span>
         </div>`).join('')}`;
     return;
@@ -561,8 +566,11 @@ function renderCleanResult(job) {
         <div class="clean-group-head"><span>${g.count} 份 · 每份 ${formatFileSize(g.size)}</span><b>可释放 ${formatFileSize(g.wasted)}</b></div>
         ${g.files.map((p, i) => `
           <div class="clean-file" title="${escapeHtml(p)}" onclick="revealCleanFile('${jsStr(p)}')">
-            <span class="clean-file-name">${i === 0 ? '保留' : '副本'} · ${escapeHtml(baseNameOf(p))}</span>
-            <span class="clean-file-meta">${escapeHtml(parentDirOf(p))}</span>
+            ${cleanCheckboxHtml(p)}
+            <div class="clean-file-main">
+              <span class="clean-file-name">${i === 0 ? '保留' : '副本'} · ${escapeHtml(baseNameOf(p))}</span>
+              <span class="clean-file-meta">${escapeHtml(parentDirOf(p))}</span>
+            </div>
           </div>`).join('')}
       </div>`).join('')}`;
 }
@@ -597,5 +605,131 @@ async function revealCleanFile(filePath) {
   row.classList.add('reveal-flash');
   setTimeout(() => row.classList.remove('reveal-flash'), 1800);
   flashStatus(`已定位「${baseNameOf(filePath)}」`);
+}
+
+
+// ---------- 精确对比 / 批量对比 ----------
+function cleanCheckboxHtml(path) {
+  const checked = cleanComparePaths.has(path) ? ' checked' : '';
+  return `<input type="checkbox" class="clean-check" data-path="${escapeHtml(path)}"${checked}
+    onclick="event.stopPropagation();toggleCompareFile(this)">`;
+}
+
+function toggleCompareFile(input) {
+  const p = input.dataset.path;
+  if (input.checked) cleanComparePaths.add(p);
+  else cleanComparePaths.delete(p);
+  updateCompareBar();
+}
+
+function updateCompareBar() {
+  const bar = document.getElementById('clean-compare-bar');
+  const count = document.getElementById('clean-compare-count');
+  const btn = document.getElementById('clean-compare-btn');
+  if (!bar) return;
+
+  const n = cleanComparePaths.size;
+  bar.style.display = n ? 'flex' : 'none';
+  if (count) count.textContent = `已选 ${n} 个文件`;
+  if (btn) {
+    btn.disabled = n < 2;
+    btn.textContent = n === 2 ? '精确对比' : (n > 2 ? `批量对比 (${n})` : '对比');
+  }
+}
+
+function clearCompareSelection() {
+  cleanComparePaths.clear();
+  document.querySelectorAll('.clean-check').forEach(el => { el.checked = false; });
+  updateCompareBar();
+}
+
+async function openCompareSelection() {
+  const paths = [...cleanComparePaths];
+  if (paths.length < 2) return;
+
+  const title = paths.length === 2 ? '精确对比两个文件' : `批量对比 ${paths.length} 个文件`;
+  showModal({
+    title,
+    wide: true,
+    okText: '关闭',
+    hideCancel: true,
+    bodyHtml: '<div class="cmp-loading">正在计算完整 SHA-256…</div>'
+  });
+
+  try {
+    const res = await fetch('/api/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '对比失败');
+
+    const body = document.getElementById('modal-body');
+    if (body) body.innerHTML = paths.length === 2 ? renderTwoFileCompare(data) : renderBatchCompare(data, paths.length);
+  } catch (err) {
+    const body = document.getElementById('modal-body');
+    if (body) body.innerHTML = `<div class="cmp-error">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function cmpHash(hash) {
+  return `<span class="cmp-hash" title="${escapeHtml(hash)}">SHA-256 ${escapeHtml(String(hash).slice(0, 16))}…</span>`;
+}
+
+function cmpCard(f, label) {
+  return `<div class="cmp-card">
+    <div class="cmp-label">${label}</div>
+    <div class="cmp-name">${escapeHtml(f.name)}</div>
+    <div class="cmp-path">${escapeHtml(f.path)}</div>
+    <div class="cmp-meta">${formatFileSize(f.size)} · ${formatDate(f.mtime)}</div>
+    ${cmpHash(f.hash)}
+  </div>`;
+}
+
+function renderTwoFileCompare(data) {
+  const [a, b] = data.files;
+  const same = data.allIdentical;
+  const d = data.firstDiff;
+
+  let diff = '';
+  if (!same) {
+    if (d && d.offset === null) {
+      diff = `<div class="cmp-diff">大小不同：A ${formatFileSize(d.sizeA)}，B ${formatFileSize(d.sizeB)}</div>`;
+    } else if (d && typeof d.offset === 'number') {
+      diff = `<div class="cmp-diff">大小相同（${formatFileSize(d.sizeA)}），首个差异在第 <b>${d.offset.toLocaleString()}</b> 字节（从 0 计数）
+        <div class="cmp-hex"><span>A: ${escapeHtml(d.hexA)}</span><span>B: ${escapeHtml(d.hexB)}</span></div></div>`;
+    } else {
+      diff = '<div class="cmp-diff">内容不同（哈希不一致）</div>';
+    }
+  }
+
+  return `<div class="cmp-verdict ${same ? 'same' : 'diff'}">${same ? '✓ 内容完全相同' : '✕ 内容不同'}</div>
+    <div class="cmp-cards">${cmpCard(a, '文件 A')}${cmpCard(b, '文件 B')}</div>
+    ${diff}
+    <div class="cmp-hint">依据完整文件 SHA-256 判断是否相同；内容不同时会逐字节定位首个差异位置。</div>`;
+}
+
+function renderBatchCompare(data, count) {
+  const groups = data.groups || [];
+  const sameGroups = groups.filter(g => g.count > 1);
+  const unique = groups.filter(g => g.count === 1);
+  const parts = [`<div class="cmp-summary">${count} 个文件：${sameGroups.length} 组内容相同，${unique.length} 个独立文件</div>`];
+
+  sameGroups.forEach(g => {
+    parts.push(`<div class="cmp-group">
+      <div class="cmp-group-head"><span>${g.count} 个文件相同 · ${formatFileSize(g.size)}</span>${cmpHash(g.hash)}</div>
+      ${g.files.map(f => `<div class="cmp-file"><span class="cmp-file-name">${escapeHtml(f.name)}</span><span class="cmp-file-dir">${escapeHtml(parentDirOf(f.path))}</span></div>`).join('')}
+    </div>`);
+  });
+
+  if (unique.length) {
+    parts.push(`<div class="cmp-group">
+      <div class="cmp-group-head"><span>互不相同的文件（${unique.length} 个）</span></div>
+      ${unique.map(g => `<div class="cmp-file"><span class="cmp-file-name">${escapeHtml(g.files[0].name)}</span><span class="cmp-file-dir">${escapeHtml(parentDirOf(g.files[0].path))}</span></div>`).join('')}
+    </div>`);
+  }
+
+  return parts.join('');
 }
 

@@ -153,6 +153,9 @@
         <div class="menu-item" onclick="openCleanPanel();closeMenu()">
           <svg class="gi menu-icon"><use href="#i-scan"/></svg><span>空间清理</span>
         </div>
+        <div class="menu-item" onclick="openBackgroundDialog();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-image"/></svg><span>界面背景</span>
+        </div>
         <div class="menu-item theme-picker-item">
           <svg class="gi menu-icon"><use href="#i-palette"/></svg><span>主题色</span>
           <div class="theme-colors" id="theme-colors">
@@ -268,6 +271,7 @@
   <input type="file" id="file-upload" multiple style="display:none" onchange="handleFileSelect(this.files)">
   <input type="file" id="folder-upload" webkitdirectory directory multiple style="display:none" onchange="handleFolderSelect(this.files)">
   <input type="file" id="photo-upload" accept="image/*" multiple style="display:none" onchange="handlePhotoSelect(this.files)">
+  <input type="file" id="bg-input" accept="image/*" style="display:none" onchange="handleBackgroundFile(this)">
 
   <div class="drop-overlay" id="drop-overlay">
     <div class="drop-content">
@@ -397,6 +401,13 @@
     </div>
     <div class="clean-progress" id="clean-progress" style="display:none">
       <span class="clean-progress-text" id="clean-progress-text">准备中…</span>
+    </div>
+    <div class="clean-compare-bar" id="clean-compare-bar" style="display:none">
+      <span id="clean-compare-count">已选 0 个文件</span>
+      <div class="clean-compare-actions">
+        <button class="clean-mini-btn" onclick="clearCompareSelection()">清空</button>
+        <button class="clean-mini-btn primary" id="clean-compare-btn" onclick="openCompareSelection()" disabled>对比</button>
+      </div>
     </div>
     <div class="clean-list" id="clean-list"></div>
   </div>
