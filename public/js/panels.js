@@ -386,6 +386,9 @@ let cleanScanId = null;
 let cleanPollTimer = null;
 let cleanScanning = false;
 const cleanComparePaths = new Set();
+let lastCompareFiles = [];
+let cmpViewerList = [];
+let cmpViewerIndex = 0;
 
 function openCleanPanel() {
   document.getElementById('trash-panel').classList.remove('open');
@@ -647,6 +650,7 @@ async function openCompareSelection() {
   const paths = [...cleanComparePaths];
   if (paths.length < 2) return;
 
+  closeCompareViewer();
   const title = paths.length === 2 ? '精确对比两个文件' : `批量对比 ${paths.length} 个文件`;
   showModal({
     title,
@@ -691,20 +695,20 @@ function cmpCard(f, label) {
 const CMP_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'ico'];
 const CMP_VIDEO_EXT = ['mp4', 'webm', 'ogg', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'm4v', 'ts'];
 
-// 对比卡片里的图片 / 视频预览，点击在新窗口打开原文件
+// 对比卡片里的图片 / 视频预览，点击用内置查看器打开
 function cmpMediaHtml(f) {
   const ext = extOf(f.name);
   const url = encodeURIComponent(f.path);
 
   if (CMP_IMAGE_EXT.includes(ext)) {
-    return `<div class="cmp-media" title="点击在新窗口查看原图"
-      onclick="event.stopPropagation();openFile('${jsStr(f.path)}')">
+    return `<div class="cmp-media" title="点击查看大图"
+      onclick="event.stopPropagation();openCompareViewer('${jsStr(f.path)}')">
       <img src="/api/thumbnail/image?path=${url}" alt="${escapeHtml(f.name)}">
     </div>`;
   }
   if (CMP_VIDEO_EXT.includes(ext)) {
-    return `<div class="cmp-media cmp-media-video" title="点击在新窗口播放"
-      onclick="event.stopPropagation();openFile('${jsStr(f.path)}')">
+    return `<div class="cmp-media cmp-media-video" title="点击播放"
+      onclick="event.stopPropagation();openCompareViewer('${jsStr(f.path)}')">
       <img src="/api/thumbnail/video?path=${url}" alt="${escapeHtml(f.name)}">
       <span class="cmp-play">▶</span>
     </div>`;
@@ -712,7 +716,100 @@ function cmpMediaHtml(f) {
   return '';
 }
 
+// 批量对比里的小缩略图
+function cmpThumbHtml(f) {
+  const ext = extOf(f.name);
+  const url = encodeURIComponent(f.path);
+  if (CMP_IMAGE_EXT.includes(ext)) {
+    return `<span class="cmp-thumb"><img src="/api/thumbnail/image?path=${url}" alt=""></span>`;
+  }
+  if (CMP_VIDEO_EXT.includes(ext)) {
+    return `<span class="cmp-thumb cmp-thumb-video"><img src="/api/thumbnail/video?path=${url}" alt=""><i>▶</i></span>`;
+  }
+  return '';
+}
+
+function cmpBatchFileHtml(f) {
+  const thumb = cmpThumbHtml(f);
+  const click = thumb ? ` onclick="openCompareViewer('${jsStr(f.path)}')"` : '';
+  return `<div class="cmp-file${thumb ? ' cmp-file-media' : ''}"${click} title="${escapeHtml(f.path)}">
+    ${thumb}
+    <div class="cmp-file-main">
+      <span class="cmp-file-name">${escapeHtml(f.name)}</span>
+      <span class="cmp-file-dir">${escapeHtml(parentDirOf(f.path))}</span>
+    </div>
+  </div>`;
+}
+
+function isCmpMedia(name) {
+  const ext = extOf(name);
+  return CMP_IMAGE_EXT.includes(ext) || CMP_VIDEO_EXT.includes(ext);
+}
+
+// 内置媒体查看器：图片 / 视频都能看，左右切换，不会触发下载
+function openCompareViewer(path) {
+  const media = (lastCompareFiles || []).filter(f => isCmpMedia(f.name));
+  if (!media.length) return;
+
+  const idx = media.findIndex(f => samePath(f.path, path));
+  cmpViewerList = media;
+  cmpViewerIndex = idx < 0 ? 0 : idx;
+  renderCompareViewer();
+}
+
+function renderCompareViewer() {
+  const f = cmpViewerList[cmpViewerIndex];
+  if (!f) return;
+
+  const stage = document.getElementById('cmp-viewer-stage');
+  if (!stage) return;
+
+  const ext = extOf(f.name);
+  const url = encodeURIComponent(f.path);
+  if (CMP_IMAGE_EXT.includes(ext)) {
+    const src = ext === 'svg' ? `/api/thumbnail/image?path=${url}` : `/api/file?path=${url}`;
+    stage.innerHTML = `<img src="${src}" alt="${escapeHtml(f.name)}">`;
+  } else {
+    stage.innerHTML = `<video src="/api/file?path=${url}" controls autoplay playsinline></video>`;
+  }
+
+  document.getElementById('cmp-viewer-name').textContent = f.name;
+  document.getElementById('cmp-viewer-counter').textContent = `${cmpViewerIndex + 1} / ${cmpViewerList.length}`;
+
+  const hasNav = cmpViewerList.length > 1;
+  document.querySelectorAll('#cmp-viewer .cmp-viewer-nav').forEach(btn => {
+    btn.style.display = hasNav ? 'flex' : 'none';
+  });
+  document.getElementById('cmp-viewer').classList.add('active');
+}
+
+function stepCompareViewer(delta) {
+  if (cmpViewerList.length < 2) return;
+  cmpViewerIndex = (cmpViewerIndex + delta + cmpViewerList.length) % cmpViewerList.length;
+  renderCompareViewer();
+}
+
+function prevCompareMedia() { stepCompareViewer(-1); }
+function nextCompareMedia() { stepCompareViewer(1); }
+
+function closeCompareViewer() {
+  const viewer = document.getElementById('cmp-viewer');
+  if (!viewer || !viewer.classList.contains('active')) return;
+
+  const video = viewer.querySelector('video');
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
+  document.getElementById('cmp-viewer-stage').innerHTML = '';
+  viewer.classList.remove('active');
+  cmpViewerList = [];
+  cmpViewerIndex = 0;
+}
+
 function renderTwoFileCompare(data) {
+  lastCompareFiles = data.files || [];
   const [a, b] = data.files;
   const same = data.allIdentical;
   const d = data.firstDiff;
@@ -732,10 +829,11 @@ function renderTwoFileCompare(data) {
   return `<div class="cmp-verdict ${same ? 'same' : 'diff'}">${same ? '✓ 内容完全相同' : '✕ 内容不同'}</div>
     <div class="cmp-cards">${cmpCard(a, '文件 A')}${cmpCard(b, '文件 B')}</div>
     ${diff}
-    <div class="cmp-hint">依据完整文件 SHA-256 判断是否相同；内容不同时会逐字节定位首个差异位置。点击图片 / 视频预览可在新窗口打开原文件。</div>`;
+    <div class="cmp-hint">依据完整文件 SHA-256 判断是否相同；内容不同时会逐字节定位首个差异位置。点击图片 / 视频可在内置查看器中打开，左右切换查看。</div>`;
 }
 
 function renderBatchCompare(data, count) {
+  lastCompareFiles = data.files || [];
   const groups = data.groups || [];
   const sameGroups = groups.filter(g => g.count > 1);
   const unique = groups.filter(g => g.count === 1);
@@ -744,17 +842,18 @@ function renderBatchCompare(data, count) {
   sameGroups.forEach(g => {
     parts.push(`<div class="cmp-group">
       <div class="cmp-group-head"><span>${g.count} 个文件相同 · ${formatFileSize(g.size)}</span>${cmpHash(g.hash)}</div>
-      ${g.files.map(f => `<div class="cmp-file"><span class="cmp-file-name">${escapeHtml(f.name)}</span><span class="cmp-file-dir">${escapeHtml(parentDirOf(f.path))}</span></div>`).join('')}
+      ${g.files.map(cmpBatchFileHtml).join('')}
     </div>`);
   });
 
   if (unique.length) {
     parts.push(`<div class="cmp-group">
       <div class="cmp-group-head"><span>互不相同的文件（${unique.length} 个）</span></div>
-      ${unique.map(g => `<div class="cmp-file"><span class="cmp-file-name">${escapeHtml(g.files[0].name)}</span><span class="cmp-file-dir">${escapeHtml(parentDirOf(g.files[0].path))}</span></div>`).join('')}
+      ${unique.map(g => cmpBatchFileHtml(g.files[0])).join('')}
     </div>`);
   }
 
+  parts.push('<div class="cmp-hint">点击带缩略图的文件可用内置查看器查看，左右切换。</div>');
   return parts.join('');
 }
 

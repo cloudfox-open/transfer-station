@@ -432,6 +432,17 @@
     </div>
   </div>
 
+  <div class="cmp-viewer" id="cmp-viewer" onclick="if(event.target===this)closeCompareViewer()">
+    <button class="cmp-viewer-close" onclick="closeCompareViewer()" title="关闭">✕</button>
+    <button class="cmp-viewer-nav prev" onclick="prevCompareMedia()" title="上一个">‹</button>
+    <button class="cmp-viewer-nav next" onclick="nextCompareMedia()" title="下一个">›</button>
+    <div class="cmp-viewer-stage" id="cmp-viewer-stage"></div>
+    <div class="cmp-viewer-info">
+      <span id="cmp-viewer-name"></span>
+      <span id="cmp-viewer-counter"></span>
+    </div>
+  </div>
+
   <div class="viewer" id="image-viewer">
     <button class="viewer-close" onclick="closeImageViewer()"><svg class="gi"><use href="#i-close"/></svg></button>
     <button class="viewer-nav prev" onclick="prevImage()"><svg class="gi"><use href="#i-back"/></svg></button>

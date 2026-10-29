@@ -153,8 +153,17 @@ function handleKeyboard(e) {
   const imgViewer = document.getElementById('image-viewer');
   const vidViewer = document.getElementById('video-viewer');
   const pdfViewer = document.getElementById('pdf-viewer');
+  const cmpViewer = document.getElementById('cmp-viewer');
   const editing = document.getElementById('address-bar').classList.contains('editing');
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+
+  // 对比媒体查看器在最上层，先处理它的键盘
+  if (cmpViewer && cmpViewer.classList.contains('active')) {
+    if (e.key === 'ArrowLeft') prevCompareMedia();
+    else if (e.key === 'ArrowRight') nextCompareMedia();
+    else if (e.key === 'Escape') closeCompareViewer();
+    return;
+  }
 
   if (e.key === 'Escape') {
     if (isModalOpen()) { closeModal(); return; }
