@@ -1065,12 +1065,12 @@ function dirNameOf(p) {
 }
 
 // 状态栏短暂提示，之后恢复常规统计
-function flashStatus(text) {
+function flashStatus(text, duration = 2800) {
   const left = document.getElementById('status-left');
   if (!left) return;
   left.textContent = text;
   clearTimeout(statusTimer);
-  statusTimer = setTimeout(updateStatus, 2800);
+  statusTimer = setTimeout(updateStatus, duration);
 }
 
 function setClipboard(op, entries) {

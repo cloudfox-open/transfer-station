@@ -603,8 +603,8 @@ async function revealCleanFile(filePath) {
 
   row.scrollIntoView({ block: 'center' });
   row.classList.add('reveal-flash');
-  setTimeout(() => row.classList.remove('reveal-flash'), 1800);
-  flashStatus(`已定位「${baseNameOf(filePath)}」`);
+  setTimeout(() => row.classList.remove('reveal-flash'), 3000);
+  flashStatus(`已定位「${baseNameOf(filePath)}」`, 5000);
 }
 
 
@@ -680,11 +680,36 @@ function cmpHash(hash) {
 function cmpCard(f, label) {
   return `<div class="cmp-card">
     <div class="cmp-label">${label}</div>
+    ${cmpMediaHtml(f)}
     <div class="cmp-name">${escapeHtml(f.name)}</div>
     <div class="cmp-path">${escapeHtml(f.path)}</div>
     <div class="cmp-meta">${formatFileSize(f.size)} · ${formatDate(f.mtime)}</div>
     ${cmpHash(f.hash)}
   </div>`;
+}
+
+const CMP_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'ico'];
+const CMP_VIDEO_EXT = ['mp4', 'webm', 'ogg', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'm4v', 'ts'];
+
+// 对比卡片里的图片 / 视频预览，点击在新窗口打开原文件
+function cmpMediaHtml(f) {
+  const ext = extOf(f.name);
+  const url = encodeURIComponent(f.path);
+
+  if (CMP_IMAGE_EXT.includes(ext)) {
+    return `<div class="cmp-media" title="点击在新窗口查看原图"
+      onclick="event.stopPropagation();openFile('${jsStr(f.path)}')">
+      <img src="/api/thumbnail/image?path=${url}" alt="${escapeHtml(f.name)}">
+    </div>`;
+  }
+  if (CMP_VIDEO_EXT.includes(ext)) {
+    return `<div class="cmp-media cmp-media-video" title="点击在新窗口播放"
+      onclick="event.stopPropagation();openFile('${jsStr(f.path)}')">
+      <img src="/api/thumbnail/video?path=${url}" alt="${escapeHtml(f.name)}">
+      <span class="cmp-play">▶</span>
+    </div>`;
+  }
+  return '';
 }
 
 function renderTwoFileCompare(data) {
@@ -707,7 +732,7 @@ function renderTwoFileCompare(data) {
   return `<div class="cmp-verdict ${same ? 'same' : 'diff'}">${same ? '✓ 内容完全相同' : '✕ 内容不同'}</div>
     <div class="cmp-cards">${cmpCard(a, '文件 A')}${cmpCard(b, '文件 B')}</div>
     ${diff}
-    <div class="cmp-hint">依据完整文件 SHA-256 判断是否相同；内容不同时会逐字节定位首个差异位置。</div>`;
+    <div class="cmp-hint">依据完整文件 SHA-256 判断是否相同；内容不同时会逐字节定位首个差异位置。点击图片 / 视频预览可在新窗口打开原文件。</div>`;
 }
 
 function renderBatchCompare(data, count) {
