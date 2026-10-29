@@ -1,15 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } = require('../lib/config');
 const {
   safePath, safeRelPath, isProtectedPath, isSameOrSubPath, pathKey,
-  copySync, moveSync, purgeThumbCache, uniqueTargetPath
+  copySync, moveSync, purgeThumbCache, purgeThumbCacheMany, uniqueTargetPath
 } = require('../lib/util');
 const { pushHistory, undoInfo, undoEntry, popHistory } = require('../lib/history');
 const { trashPaths, listTrash, restoreBatch, emptyTrash, trashCount } = require('../lib/trash');
+const { logOperation } = require('../lib/oplog');
 
-const BAD_NAME = /[\\/:*?"<>|]/;
+const BAD_NAME = /[\x00-\x1f\\/:*?"<>|]/;
+
+// multer（busboy）默认按 latin1 读取 multipart 的文件名，
+// 中文名会变成「ä¸æ–‡」这种乱码，这里尽量还原成 UTF-8。
+function decodeUploadName(name) {
+  const raw = String(name || '').replace(/\\/g, '/').split('/').pop() || 'file';
+  // 已经含有多字节字符，说明解码正常，别再动
+  if (/[^\x00-\xff]/.test(raw)) return raw;
+  const fixed = Buffer.from(raw, 'latin1').toString('utf8');
+  return fixed.includes('\uFFFD') ? raw : fixed;
+}
 
 module.exports = function registerManageRoutes(app) {
   // 上传先落到临时文件名，成功后再按原名（或文件夹相对路径）归位，
@@ -34,7 +44,7 @@ module.exports = function registerManageRoutes(app) {
         cb(null, name);
       }
     }),
-    limits: { fileSize: MAX_UPLOAD_BYTES, files: 20 }
+    limits: { files: 20 }
   });
 
   // 清理本次上传留下的半截临时文件
@@ -93,6 +103,7 @@ module.exports = function registerManageRoutes(app) {
     try {
       fs.mkdirSync(target);
       pushHistory({ type: 'mkdir', label: `新建文件夹「${name}」`, items: [{ to: target }] });
+      logOperation(req, '新建文件夹', `「${name}」→ ${dirPath}`);
       res.json({ success: true, path: target, history: undoInfo() });
     } catch (err) {
       res.status(500).json({ error: '创建失败: ' + err.message });
@@ -125,6 +136,7 @@ module.exports = function registerManageRoutes(app) {
         label: `重命名「${path.basename(src)}」`,
         items: [{ from: src, to: target }]
       });
+      logOperation(req, '重命名', `「${path.basename(src)}」→「${name}」（${parent}）`);
       res.json({ success: true, path: target, history: undoInfo() });
     } catch (err) {
       res.status(500).json({ error: '重命名失败: ' + err.message });
@@ -199,6 +211,9 @@ module.exports = function registerManageRoutes(app) {
       label: `批量重命名 ${renamed.length} 个项目`,
       items: renamed.map(t => ({ from: t.from, to: t.to }))
     });
+    logOperation(req, '批量重命名', `${renamed.length} 个项目（${path.dirname(renamed[0].from)}）`, 'ok', {
+      items: renamed.map(t => `${path.basename(t.from)} → ${path.basename(t.to)}`)
+    });
 
     res.json({
       success: true,
@@ -226,9 +241,6 @@ module.exports = function registerManageRoutes(app) {
 
       if (err) {
         cleanup();
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          return res.status(413).json({ error: `单个文件超过 ${MAX_UPLOAD_MB} MB 上限` });
-        }
         if (/目标目录无效/.test(err.message || '')) {
           return res.status(400).json({ error: '目标目录无效' });
         }
@@ -248,7 +260,7 @@ module.exports = function registerManageRoutes(app) {
 
       for (const file of files) {
         try {
-          const original = path.basename(String(file.originalname || 'file'));
+          const original = decodeUploadName(file.originalname);
           const relPath = rel || original;
           const parent = path.dirname(path.join(targetDir, relPath));
           fs.mkdirSync(parent, { recursive: true });
@@ -259,6 +271,11 @@ module.exports = function registerManageRoutes(app) {
           try { fs.unlinkSync(file.path); } catch { /* 忽略 */ }
         }
       }
+
+      const status = saved.length === files.length ? 'ok' : (saved.length ? 'partial' : 'fail');
+      logOperation(req, '上传', `${saved.length}/${files.length} 个文件 → ${targetDir}`, status, {
+        items: saved.map(s => s.name)
+      });
 
       res.json({ success: true, count: saved.length, files: saved });
     });
@@ -278,15 +295,21 @@ module.exports = function registerManageRoutes(app) {
 
     const { id, items, failed } = trashPaths(targets);
     if (items.length === 0) {
+      logOperation(req, '删除', `${targets.length} 个项目（失败）`, 'fail', {
+        items: targets.slice(0, 50)
+      });
       return res.status(500).json({ error: failed[0] ? failed[0].error : '删除失败', failed });
     }
 
-    items.forEach(it => purgeThumbCache(it.originalPath));
+    purgeThumbCacheMany(targets);
     pushHistory({
       type: 'trash',
       label: `删除 ${items.length} 个项目`,
       trashId: id,
       items: items.map(it => ({ from: it.originalPath }))
+    });
+    logOperation(req, '删除', `${items.length} 个项目 → 回收站`, failed.length ? 'partial' : 'ok', {
+      items: items.slice(0, 50).map(it => it.originalPath)
     });
 
     res.json({
@@ -308,13 +331,20 @@ module.exports = function registerManageRoutes(app) {
     if (!id) return res.status(400).json({ error: '未指定要还原的批次' });
     const r = restoreBatch(id);
     if (r.restored.length === 0) {
+      logOperation(req, '还原', `批次 ${id}（失败）`, 'fail', {
+        items: r.failed.slice(0, 50).map(f => f.path)
+      });
       return res.status(500).json({ error: (r.failed[0] && r.failed[0].error) || '还原失败', failed: r.failed });
     }
+    logOperation(req, '还原', `${r.restored.length} 个项目`, r.failed.length ? 'partial' : 'ok', {
+      items: r.restored.slice(0, 50).map(x => x.to)
+    });
     res.json({ success: true, restored: r.restored, failed: r.failed, count: trashCount() });
   });
 
   app.post('/api/trash/empty', (req, res) => {
     const r = emptyTrash();
+    logOperation(req, '清空回收站', `${r.removed} 个批次（永久删除）`);
     res.json({ success: true, removed: r.removed, count: 0 });
   });
 
@@ -371,6 +401,9 @@ module.exports = function registerManageRoutes(app) {
     }
 
     if (items.length === 0 && skipped.length === 0) {
+      logOperation(req, label, `${sources.length} 个项目（失败）`, 'fail', {
+        items: failed.slice(0, 50).map(f => f.path)
+      });
       return res.status(500).json({ error: failed[0] ? failed[0].error : `${label}失败`, failed });
     }
 
@@ -379,6 +412,9 @@ module.exports = function registerManageRoutes(app) {
         type: isCopy ? 'copy' : 'move',
         label: `${label} ${items.length} 个项目`,
         items: items.map(i => ({ from: i.from, to: i.to }))
+      });
+      logOperation(req, label, `${items.length} 个项目 → ${targetDir}`, failed.length ? 'partial' : 'ok', {
+        items: items.slice(0, 50).map(i => i.from)
       });
     }
 
@@ -400,12 +436,18 @@ module.exports = function registerManageRoutes(app) {
     const { done, failed, focus } = undoEntry(entry);
 
     if (done.length === 0) {
+      // 一步都没撤销成功就把记录放回去，否则用户会白白丢掉一次撤销机会
+      pushHistory(entry);
+      logOperation(req, '撤销', `「${entry.label}」（失败）`, 'fail');
       return res.status(500).json({
         error: failed[0] ? failed[0].error : '撤销失败',
         failed,
         history: undoInfo()
       });
     }
+    logOperation(req, '撤销', `「${entry.label}」`, failed.length ? 'partial' : 'ok', {
+      items: done.slice(0, 50).map(d => d.from || d.to)
+    });
     res.json({
       success: true,
       undone: entry.label,

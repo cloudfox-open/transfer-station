@@ -19,11 +19,27 @@ async function newFolder() {
   } catch (err) { alert('创建失败: ' + err.message); }
 }
 
-let pendingFiles = [];      // [{ file, rel, status, percent }]
-let uploadXhr = null;
+let pendingFiles = [];      // [{ file, rel, status, percent, uploadedBytes, error }]
+let activeXhrs = new Set();
 let uploading = false;
+let uploadPaused = false;
 let uploadCancelled = false;
 let currentUploadItem = null;
+let uploadTargetPath = '';  // 本批目标目录，开始上传时固定，之后切换目录不影响
+let uploadTotal = 0;
+let uploadDoneCount = 0;
+let uploadQueue = [];       // 本批要上传的条目
+let uploadQueueIndex = 0;
+let uploadInFlight = 0;
+let uploadBytesTotal = 0;
+let uploadSpeed = 0;        // 字节 / 秒
+let uploadEta = 0;          // 秒
+let uploadErrorSummary = '';
+let speedSamples = [];
+let lastProgressPaint = 0;
+
+const CONCURRENCY_KEY = 'upload-concurrency';
+let uploadConcurrency = Math.min(4, Math.max(1, Number(localStorage.getItem(CONCURRENCY_KEY)) || 2));
 
 function triggerUpload() {
   if (currentView !== 'files') return alert('请先进入一个文件夹再上传');
@@ -54,22 +70,12 @@ function addPendingFiles(files, isFolder) {
     // 文件夹上传时保留相对路径，服务端会照着建目录
     rel: isFolder ? (f.webkitRelativePath || f.name) : '',
     status: 'pending',
-    percent: 0
+    percent: 0,
+    uploadedBytes: 0,
+    error: ''
   }));
 
-  // 超过服务端单文件上限的直接拦下来，不用先传一遍再失败
-  const limit = (serverConfig.maxUploadMB || 102400) * 1024 * 1024;
-  const over = all.filter(i => i.file.size > limit);
-  const list = all.filter(i => i.file.size <= limit);
-
-  if (over.length) {
-    alert(`以下文件超过单文件 ${formatFileSize(limit)} 上限，已跳过：\n`
-      + over.slice(0, 5).map(i => `· ${i.rel || i.file.name}（${formatFileSize(i.file.size)}）`).join('\n')
-      + (over.length > 5 ? `\n…共 ${over.length} 个文件超限` : ''));
-  }
-  if (!list.length) return;
-
-  pendingFiles = pendingFiles.concat(list);
+  pendingFiles = pendingFiles.concat(all);
   document.getElementById('upload-title').textContent = isFolder ? '上传文件夹' : '上传文件';
   showUploadPanel();
 }
@@ -82,16 +88,129 @@ function uploadStatusText(item) {
   return formatFileSize(item.file.size);
 }
 
+function setUploadConcurrency(value) {
+  uploadConcurrency = Math.min(4, Math.max(1, Number(value) || 1));
+  localStorage.setItem(CONCURRENCY_KEY, String(uploadConcurrency));
+  const el = document.getElementById('upload-concurrency');
+  if (el) el.value = String(uploadConcurrency);
+  if (uploading && !uploadPaused) pumpUploadQueue();
+}
+
+function formatSpeed(bytesPerSec) {
+  return formatFileSize(Math.round(bytesPerSec || 0)) + '/s';
+}
+
+function formatDuration(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  if (s < 60) return s + ' 秒';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} 分 ${s % 60} 秒`;
+  return `${Math.floor(m / 60)} 时 ${m % 60} 分`;
+}
+
+function uploadDoneBytes() {
+  let sum = 0;
+  for (const f of uploadQueue) {
+    if (f.status === 'done') sum += f.file.size || 0;
+    else if (f.status === 'uploading') sum += Math.min(f.uploadedBytes || 0, f.file.size || 0);
+  }
+  return sum;
+}
+
+// 3 秒滑动窗口估算速度，再算剩余时间
+function sampleUploadSpeed() {
+  if (!uploading) return;
+  const now = Date.now();
+  const bytes = uploadDoneBytes();
+  speedSamples.push({ t: now, b: bytes });
+  while (speedSamples.length > 2 && now - speedSamples[0].t > 3000) speedSamples.shift();
+
+  const first = speedSamples[0];
+  const dt = (now - first.t) / 1000;
+  if (dt < 0.4) return;
+  const speed = (bytes - first.b) / dt;
+  uploadSpeed = speed > 0 ? speed : 0;
+  const remain = Math.max(0, uploadBytesTotal - bytes);
+  uploadEta = uploadSpeed > 1024 ? remain / uploadSpeed : 0;
+}
+
+function uploadOverallPercent() {
+  if (uploadBytesTotal > 0) {
+    return Math.min(100, Math.round((uploadDoneBytes() / uploadBytesTotal) * 100));
+  }
+  if (!uploadTotal) return 0;
+  return Math.min(100, Math.round((uploadDoneCount / uploadTotal) * 100));
+}
+
+function uploadProgressLabel() {
+  if (!uploadTotal) return '';
+  const base = `${uploadDoneCount}/${uploadTotal}`;
+  if (uploadPaused) return `暂停中 ${base}`;
+  const parts = [base];
+  if (uploadSpeed > 0) parts.push(formatSpeed(uploadSpeed));
+  if (uploadEta > 0) parts.push(`剩余 ${formatDuration(uploadEta)}`);
+  return parts.join(' · ');
+}
+
+function updateUploadProgressUI(force) {
+  const now = Date.now();
+  if (!force && now - lastProgressPaint < 150) return;   // 进度事件太密时不必每次都刷 DOM
+  lastProgressPaint = now;
+
+  sampleUploadSpeed();
+  const fill = document.getElementById('upload-progress-fill');
+  const text = document.getElementById('upload-progress-text');
+  if (fill) fill.style.width = uploadOverallPercent() + '%';
+  if (text && uploadTotal) text.textContent = uploadProgressLabel();
+  updateUploadMini();
+}
+
+// 面板收起后，右下角保留一个进度胶囊，点一下重新打开面板
+function updateUploadMini() {
+  const el = document.getElementById('upload-mini');
+  if (!el) return;
+  const panelOpen = document.getElementById('upload-panel').classList.contains('open');
+  if (!uploading || panelOpen) { el.classList.remove('active'); return; }
+
+  const pct = uploadOverallPercent();
+  const text = document.getElementById('upload-mini-text');
+  const fill = document.getElementById('upload-mini-fill');
+  let label = uploadPaused
+    ? `已暂停 ${uploadDoneCount}/${uploadTotal}`
+    : `上传中 ${uploadDoneCount}/${uploadTotal} · ${pct}%`;
+  if (!uploadPaused && uploadSpeed > 0) label = `上传中 ${uploadDoneCount}/${uploadTotal} · ${formatSpeed(uploadSpeed)}`;
+  if (text) text.textContent = label;
+  if (fill) fill.style.width = pct + '%';
+  el.classList.add('active');
+}
+
+function setUploadControls() {
+  const confirmBtn = document.getElementById('upload-confirm-btn');
+  const cancelBtn = document.getElementById('upload-cancel-btn');
+  if (!confirmBtn || !cancelBtn) return;
+
+  if (uploading) {
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = uploadPaused ? '继续上传' : '暂停上传';
+    cancelBtn.textContent = '取消上传';
+  } else {
+    confirmBtn.disabled = !pendingFiles.length;
+    confirmBtn.textContent = pendingFiles.some(f => f.status === 'error' || f.status === 'cancelled')
+      ? '继续上传'
+      : '开始上传';
+    cancelBtn.textContent = '取消';
+  }
+}
+
 function showUploadPanel() {
   const panel = document.getElementById('upload-panel');
   const list = document.getElementById('upload-file-list');
-  document.getElementById('upload-progress-container').style.display = 'none';
+  const progress = document.getElementById('upload-progress-container');
+  const concurrency = document.getElementById('upload-concurrency');
 
-  const confirmBtn = document.getElementById('upload-confirm-btn');
-  confirmBtn.disabled = uploading;
-  confirmBtn.textContent = uploading
-    ? '上传中…'
-    : (pendingFiles.some(f => f.status === 'error' || f.status === 'cancelled') ? '继续上传' : '开始上传');
+  progress.style.display = uploading ? 'flex' : 'none';
+  if (concurrency) concurrency.value = String(uploadConcurrency);
+  setUploadControls();
 
   list.innerHTML = pendingFiles.map((item, i) => `
     <div class="upload-file-item">
@@ -105,6 +224,8 @@ function showUploadPanel() {
     </div>`).join('');
 
   panel.classList.add('open');
+  if (uploading) updateUploadProgressUI(true);
+  else updateUploadMini();
 }
 
 function removeUploadFile(index) {
@@ -113,10 +234,30 @@ function removeUploadFile(index) {
 }
 
 function closeUploadPanel() {
-  if (uploading) cancelUpload(true);
   document.getElementById('upload-panel').classList.remove('open');
-  document.getElementById('upload-cancel-btn').textContent = '取消';
+  // 上传中关面板只是收起来，任务继续在后台跑；要停请点「取消上传」
+  if (uploading) {
+    updateUploadMini();
+    return;
+  }
   pendingFiles = [];
+  setUploadControls();
+  updateUploadMini();
+}
+
+function pauseUpload() {
+  if (!uploading) return;
+  uploadPaused = true;
+  setUploadControls();
+  updateUploadProgressUI(true);
+}
+
+function resumeUpload() {
+  if (!uploading) return;
+  uploadPaused = false;
+  setUploadControls();
+  updateUploadProgressUI(true);
+  pumpUploadQueue();
 }
 
 function cancelUpload(silent) {
@@ -125,8 +266,19 @@ function cancelUpload(silent) {
     return;
   }
   uploadCancelled = true;
-  if (currentUploadItem) currentUploadItem.status = 'cancelled';
-  if (uploadXhr) uploadXhr.abort();
+  uploadPaused = false;
+
+  activeXhrs.forEach(xhr => { try { xhr.abort(); } catch { /* 忽略 */ } });
+  // 还在排队的直接标记取消
+  for (let i = uploadQueueIndex; i < uploadQueue.length; i++) {
+    uploadQueue[i].status = 'cancelled';
+    setUploadRow(uploadQueue[i]);
+  }
+  uploadQueueIndex = uploadQueue.length;
+
+  setUploadControls();
+  updateUploadProgressUI(true);
+  if (uploadInFlight === 0) maybeFinishUpload();
 }
 
 // 单个文件上传，返回 Promise（进度写回对应行）
@@ -138,17 +290,22 @@ function uploadOne(item) {
 
     const idx = pendingFiles.indexOf(item);
     const xhr = new XMLHttpRequest();
-    uploadXhr = xhr;
+    activeXhrs.add(xhr);
     currentUploadItem = item;
+
+    const finish = () => activeXhrs.delete(xhr);
 
     xhr.upload.addEventListener('progress', (e) => {
       if (!e.lengthComputable) return;
+      item.uploadedBytes = e.loaded;
       item.percent = Math.round((e.loaded / e.total) * 100);
       const el = document.getElementById('up-status-' + idx);
       if (el) el.textContent = item.percent + '%';
+      updateUploadProgressUI();
     });
 
     xhr.addEventListener('load', () => {
+      finish();
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const d = JSON.parse(xhr.responseText);
@@ -159,10 +316,10 @@ function uploadOne(item) {
       try { msg = JSON.parse(xhr.responseText).error || msg; } catch { /* 忽略 */ }
       reject(new Error(msg));
     });
-    xhr.addEventListener('error', () => reject(new Error('网络错误')));
-    xhr.addEventListener('abort', () => reject('cancelled'));
+    xhr.addEventListener('error', () => { finish(); reject(new Error('网络错误')); });
+    xhr.addEventListener('abort', () => { finish(); reject('cancelled'); });
 
-    xhr.open('POST', `/api/upload?path=${encodeURIComponent(currentPath)}`);
+    xhr.open('POST', `/api/upload?path=${encodeURIComponent(uploadTargetPath || currentPath)}`);
     xhr.send(form);
   });
 }
@@ -173,70 +330,149 @@ function setUploadRow(item) {
   if (el) el.textContent = uploadStatusText(item);
 }
 
-async function confirmUpload() {
-  if (uploading || !pendingFiles.length) return;
+function startUploadItem(item) {
+  uploadInFlight++;
+  item.status = 'uploading';
+  item.percent = 0;
+  item.uploadedBytes = 0;
+  item.error = '';
+  currentUploadItem = item;
+  setUploadRow(item);
+  updateUploadProgressUI(true);
+
+  uploadOne(item)
+    .then(() => {
+      item.status = 'done';
+      item.percent = 100;
+      item.uploadedBytes = item.file.size || 0;
+      uploadDoneCount++;
+    })
+    .catch((err) => {
+      if (err === 'cancelled' || uploadCancelled) {
+        item.status = 'cancelled';
+      } else {
+        item.status = 'error';
+        item.error = (err && err.message) || '上传失败';
+        if (!uploadErrorSummary) uploadErrorSummary = `「${item.rel || item.file.name}」上传失败：${item.error}`;
+      }
+    })
+    .finally(() => {
+      uploadInFlight--;
+      setUploadRow(item);
+      updateUploadProgressUI(true);
+      // 让出栈，避免并发完成时递归过深
+      setTimeout(pumpUploadQueue, 0);
+    });
+}
+
+// 并发调度：同时最多跑 uploadConcurrency 个
+function pumpUploadQueue() {
+  if (!uploading) return;
+  if (uploadCancelled) { maybeFinishUpload(); return; }
+
+  if (!uploadPaused) {
+    while (uploadInFlight < uploadConcurrency && uploadQueueIndex < uploadQueue.length) {
+      startUploadItem(uploadQueue[uploadQueueIndex++]);
+    }
+  }
+  maybeFinishUpload();
+}
+
+function maybeFinishUpload() {
+  if (!uploading) return;
+  if (uploadInFlight > 0) return;
+  if (uploadQueueIndex < uploadQueue.length) return;
+  finalizeUpload();
+}
+
+function finalizeUpload() {
+  uploading = false;
+  uploadPaused = false;
+  activeXhrs.clear();
+
+  if (uploadCancelled) {
+    uploadQueue.forEach(f => {
+      if (f.status === 'uploading' || f.status === 'pending') {
+        f.status = 'cancelled';
+        setUploadRow(f);
+      }
+    });
+  }
+
+  const allDone = pendingFiles.every(f => f.status === 'done');
+  setUploadControls();
+  updateUploadProgressUI(true);
+  updateUploadMini();
+
+  const progressText = document.getElementById('upload-progress-text');
+  if (allDone) {
+    if (progressText) progressText.textContent = '✓ 全部完成';
+    // 只刷新目标目录；用户已经切到别处就别打断他
+    if (uploadTargetPath && samePath(uploadTargetPath, currentPath)) refreshView();
+    if (!document.getElementById('upload-panel').classList.contains('open')) {
+      const doneTotal = pendingFiles.filter(f => f.status === 'done').length;
+      flashStatus(`已上传 ${doneTotal} 个文件到「${baseNameOf(uploadTargetPath) || uploadTargetPath}」`);
+    }
+    setTimeout(closeUploadPanel, 600);
+    return;
+  }
+
+  if (uploadErrorSummary) {
+    if (progressText) progressText.textContent = '部分失败';
+    alert(uploadErrorSummary + '\n可以点「继续上传」重试失败的文件。');
+  } else if (uploadCancelled) {
+    if (progressText) progressText.textContent = '已取消';
+  }
+}
+
+function confirmUpload() {
+  // 上传中再点一次 = 暂停 / 继续
+  if (uploading) {
+    if (uploadPaused) resumeUpload();
+    else pauseUpload();
+    return;
+  }
+  if (!pendingFiles.length) return;
 
   const targets = pendingFiles.filter(f => f.status !== 'done');
   if (!targets.length) { closeUploadPanel(); return; }
 
+  const bytes = targets.reduce((s, f) => s + (f.file.size || 0), 0);
+  const drive = driveForPath(currentPath);
+  if (drive && drive.free > 0 && bytes > drive.free) {
+    if (!confirm(`目标磁盘 ${driveShortName(drive)} 只剩 ${formatFileSize(drive.free)}，本次要上传 ${formatFileSize(bytes)}，可能中途失败。仍要继续？`)) return;
+  }
+
+  targets.forEach(f => {
+    f.status = 'pending';
+    f.percent = 0;
+    f.uploadedBytes = 0;
+    f.error = '';
+  });
+
   uploading = true;
+  uploadPaused = false;
   uploadCancelled = false;
+  uploadTargetPath = currentPath;     // 目标目录在这一批开始时固定下来
+  uploadTotal = targets.length;
+  uploadDoneCount = 0;
+  uploadQueue = targets;
+  uploadQueueIndex = 0;
+  uploadInFlight = 0;
+  uploadBytesTotal = bytes;
+  uploadSpeed = 0;
+  uploadEta = 0;
+  uploadErrorSummary = '';
+  speedSamples = [];
+  lastProgressPaint = 0;
 
-  const confirmBtn = document.getElementById('upload-confirm-btn');
-  const cancelBtn = document.getElementById('upload-cancel-btn');
   const progressContainer = document.getElementById('upload-progress-container');
-  const progressFill = document.getElementById('upload-progress-fill');
-  const progressText = document.getElementById('upload-progress-text');
+  if (progressContainer) progressContainer.style.display = 'flex';
 
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = '上传中…';
-  cancelBtn.textContent = '取消上传';
-  progressContainer.style.display = 'flex';
-  progressFill.style.width = '0%';
-  progressText.textContent = `0 / ${targets.length}`;
-
-  let done = 0;
-
-  for (const item of targets) {
-    if (uploadCancelled) break;
-    item.status = 'uploading';
-    item.percent = 0;
-    setUploadRow(item);
-
-    try {
-      await uploadOne(item);
-      item.status = 'done';
-      item.percent = 100;
-      done++;
-    } catch (err) {
-      item.status = (err === 'cancelled' || uploadCancelled) ? 'cancelled' : 'error';
-      setUploadRow(item);
-      if (item.status === 'cancelled') break;
-      // 一旦失败就停下，避免刷屏式报错；用户可以点「继续上传」
-      if (err && err.message) alert(`「${item.rel || item.file.name}」上传失败：${err.message}`);
-      break;
-    } finally {
-      setUploadRow(item);
-      progressFill.style.width = Math.round((done / targets.length) * 100) + '%';
-      progressText.textContent = `${done} / ${targets.length}`;
-    }
-  }
-
-  uploading = false;
-  uploadXhr = null;
-  currentUploadItem = null;
-  cancelBtn.textContent = '取消';
-
-  const allDone = pendingFiles.every(f => f.status === 'done');
-  if (allDone) {
-    progressText.textContent = '✓ 全部完成';
-    setTimeout(() => { closeUploadPanel(); refreshView(); }, 500);
-    return;
-  }
-
-  confirmBtn.disabled = false;
-  confirmBtn.textContent = '继续上传';
-  if (uploadCancelled) progressText.textContent = '已取消';
+  uploadQueue.forEach(f => setUploadRow(f));
+  setUploadControls();
+  updateUploadProgressUI(true);
+  pumpUploadQueue();
 }
 
 function initDragDrop() {
@@ -275,6 +511,10 @@ function downloadZip() {
 async function openTrashPanel() {
   closeMenu();
   document.getElementById('favorites-panel').classList.remove('open');
+  document.getElementById('memo-panel').classList.remove('open');
+  document.getElementById('photos-panel').classList.remove('open');
+  document.getElementById('log-panel').classList.remove('open');
+  document.getElementById('clean-panel').classList.remove('open');
   document.getElementById('trash-panel').classList.add('open');
   await loadTrash();
 }
@@ -306,7 +546,7 @@ function renderTrash(data) {
     <div class="trash-batch">
       <div class="trash-batch-head">
         <span>${formatDate(b.at)} · ${b.items.length} 项</span>
-        <button class="trash-restore-all" onclick="restoreTrashBatch('${b.id}')">全部还原</button>
+        <button class="trash-restore-all" onclick="restoreTrashBatch('${jsStr(b.id)}')">全部还原</button>
       </div>
       ${b.items.map(it => `
         <div class="trash-item${it.exists ? '' : ' missing'}">
@@ -1134,4 +1374,18 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str == null ? '' : String(str);
   return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// 把路径塞进内联 onclick 的单引号字符串里：
+// 先做 JS 转义，再做 HTML 转义，名字里有 ' \ " < & 或换行也不会把脚本撑破。
+function jsStr(str) {
+  return String(str == null ? '' : str)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

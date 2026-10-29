@@ -49,6 +49,12 @@ function closeImageViewer() {
   document.getElementById('image-viewer').classList.remove('active');
   document.body.style.overflow = '';
   stopSlideshow();
+  // 从生活区照片面板进来时，把目录里的图片列表还回去
+  if (photoListBackup) {
+    imageList = photoListBackup.list;
+    currentImageIndex = photoListBackup.index;
+    photoListBackup = null;
+  }
 }
 
 // 幻灯片

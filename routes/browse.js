@@ -3,20 +3,17 @@ const path = require('path');
 const sharp = require('sharp');
 const ffmpeg = require('fluent-ffmpeg');
 const archiver = require('archiver');
-const { CACHE_DIR, MAX_UPLOAD_MB, CACHE_MAX_MB } = require('../lib/config');
+const { CACHE_DIR } = require('../lib/config');
 const {
   naturalCollator, safePath, isImage, isVideo, sortItems, uniqueZipEntry
 } = require('../lib/util');
 
 module.exports = function registerBrowseRoutes(app) {
-  // ---------- 运行配置（前端用来做上传前预检） ----------
-  app.get('/api/config', (req, res) => {
-    res.json({
-      platform: process.platform,
-      maxUploadMB: MAX_UPLOAD_MB,
-      cacheMaxMB: CACHE_MAX_MB
-    });
-  });
+  // 中文文件名用 RFC 5987 的 filename* 传，避免浏览器把百分号编码直接显示出来
+  function zipAttachment(name) {
+    const safe = encodeURIComponent(name).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+    return `attachment; filename="download.zip"; filename*=UTF-8''${safe}`;
+  }
 
   // ---------- 目录列表 ----------
   app.get('/api/list', (req, res) => {
@@ -211,7 +208,7 @@ module.exports = function registerBrowseRoutes(app) {
       const parents = new Set(multi.map(p => path.dirname(p)));
       const zipName = parents.size === 1 ? (path.basename([...parents][0]) || 'download') : 'download';
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(zipName)}.zip"`);
+      res.setHeader('Content-Disposition', zipAttachment(zipName + '.zip'));
 
       const used = new Set();
       const archive = archiver('zip', { zlib: { level: 5 } });
@@ -241,7 +238,7 @@ module.exports = function registerBrowseRoutes(app) {
 
     const dirName = path.basename(dirPath) || 'download';
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(dirName)}.zip"`);
+    res.setHeader('Content-Disposition', zipAttachment(dirName + '.zip'));
 
     const archive = archiver('zip', { zlib: { level: 5 } });
     archive.on('error', (err) => {

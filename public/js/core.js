@@ -33,9 +33,6 @@ let searchTimer = null;
 let searchMode = false;
 let searchRecursive = localStorage.getItem(SEARCH_SUB_KEY) === '1';
 
-// 服务端配置（上传上限等），启动时拉取，用于上传前预检
-let serverConfig = { maxUploadMB: 102400, cacheMaxMB: 500 };
-
 // 手机端：选择模式（点条目 = 勾选）
 let selectionMode = false;
 
@@ -66,13 +63,6 @@ const isTouch = window.matchMedia('(hover: none)').matches;
 // =========================================================
 // 初始化
 // =========================================================
-async function loadServerConfig() {
-  try {
-    const res = await fetch('/api/config');
-    if (res.ok) serverConfig = await res.json();
-  } catch { /* 用默认值即可 */ }
-}
-
 window.addEventListener('DOMContentLoaded', () => {
   initTheme();
   loadThemeColor();
@@ -85,7 +75,6 @@ window.addEventListener('DOMContentLoaded', () => {
   updateSortIndicators();
   loadDrives();
   loadUndoState();
-  loadServerConfig();
 
   // 支持深链：?path=F:/some/dir&view=details|icons&theme=dark|light
   const params = new URLSearchParams(location.search);
@@ -303,12 +292,28 @@ function loadThemeColor() {
 // 菜单 / 导航窗格
 // =========================================================
 function toggleMenu() {
-  document.getElementById('fab-btn').classList.toggle('active');
-  document.getElementById('fab-menu').classList.toggle('open');
+  const btn = document.getElementById('fab-btn');
+  const menu = document.getElementById('fab-menu');
+  if (!btn || !menu) return;
+
+  const open = !menu.classList.contains('open');
+  btn.classList.toggle('active', open);
+  menu.classList.toggle('open', open);
+  if (!open) return;
+
+  // 命令栏是 overflow-x:auto，会裁剪绝对定位子元素，所以打开时把菜单挂到 body 上
+  if (menu.parentElement !== document.body) document.body.appendChild(menu);
+
+  const r = btn.getBoundingClientRect();
+  menu.style.top = Math.round(r.bottom + 4) + 'px';
+  menu.style.right = Math.round(window.innerWidth - r.right) + 'px';
+  menu.style.left = 'auto';
 }
 function closeMenu() {
-  document.getElementById('fab-btn').classList.remove('active');
-  document.getElementById('fab-menu').classList.remove('open');
+  const btn = document.getElementById('fab-btn');
+  const menu = document.getElementById('fab-menu');
+  if (btn) btn.classList.remove('active');
+  if (menu) menu.classList.remove('open');
 }
 
 function toggleNavPane() {

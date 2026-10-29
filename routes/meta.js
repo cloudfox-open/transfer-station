@@ -1,14 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
-const { FAVORITES_FILE, MEMOS_FILE, PHOTOS_DIR, CACHE_DIR } = require('../lib/config');
+const { FAVORITES_FILE, MEMOS_FILE, PHOTOS_DIR, CACHE_DIR, IMAGE_EXT } = require('../lib/config');
 const { isImage } = require('../lib/util');
 
 module.exports = function registerMetaRoutes(app) {
 
 function readFavorites() {
   try {
-    return JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8'));
+    const list = JSON.parse(fs.readFileSync(FAVORITES_FILE, 'utf8'));
+    return Array.isArray(list) ? list : [];
   } catch { return []; }
 }
 
@@ -57,7 +58,8 @@ app.delete('/api/favorites/:index', (req, res) => {
 // 备忘录读写
 function readMemos() {
   try {
-    return JSON.parse(fs.readFileSync(MEMOS_FILE, 'utf8'));
+    const list = JSON.parse(fs.readFileSync(MEMOS_FILE, 'utf8'));
+    return Array.isArray(list) ? list : [];
   } catch { return []; }
 }
 
@@ -104,11 +106,14 @@ app.put('/api/lifezone/memos/:id', (req, res) => {
   if (pinned !== undefined) list[index].pinned = pinned;
   list[index].updatedAt = new Date().toISOString();
 
+  // 排序后 list[index] 指向别的备忘录，所以先留一份引用
+  const memo = list[index];
+
   // 置顶的排在前面
   list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
   writeMemos(list);
-  res.json(list[index]);
+  res.json(memo);
 });
 
 // 删除备忘录
@@ -138,7 +143,8 @@ const photoUpload = multer({
     } else {
       cb(new Error('只支持图片文件'));
     }
-  }
+  },
+  limits: { files: 20 }
 });
 
 // 获取照片列表
@@ -166,8 +172,10 @@ app.get('/api/lifezone/photos', (req, res) => {
 // 上传照片
 app.post('/api/lifezone/photos', (req, res, next) => {
   photoUpload.array('photos', 20)(req, res, (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, count: req.files.length });
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.json({ success: true, count: (req.files || []).length });
   });
 });
 

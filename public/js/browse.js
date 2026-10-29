@@ -13,6 +13,21 @@ async function loadDrives() {
   renderNavDrives();
   if (currentView === 'drives') renderDriveGrid();
   updateStatus();
+  checkLowDiskSpace();
+}
+
+// 剩余空间低于「总容量 5% 或 1 GB」就在状态栏提醒一次
+let warnedLowDrives = new Set();
+
+function checkLowDiskSpace() {
+  const low = drivesData.filter(d => d.total > 0 && d.free >= 0 && d.free < Math.max(1024 * 1024 * 1024, d.total * 0.05));
+  if (!low.length) return;
+
+  const fresh = low.filter(d => !warnedLowDrives.has(d.letter || d.path));
+  if (!fresh.length) return;
+  fresh.forEach(d => warnedLowDrives.add(d.letter || d.path));
+
+  flashStatus('⚠ 磁盘空间不足：' + fresh.map(d => `${driveShortName(d)} 仅剩 ${formatFileSize(d.free)}`).join('，'));
 }
 
 // Windows 是「卷标 (C:)」，类 Unix 直接用挂载点
@@ -70,7 +85,7 @@ function renderNavDrives() {
   box.innerHTML = drivesData.map(d => {
     const active = currentView === 'files' && driveForPath(currentPath) === d;
     return `
-      <div class="nav-item ${active ? 'active' : ''}" onclick="openDrive('${d.path.replace(/\\/g, '\\\\')}')" title="${escapeHtml(driveDisplayName(d))}">
+      <div class="nav-item ${active ? 'active' : ''}" onclick="openDrive('${jsStr(d.path)}')" title="${escapeHtml(driveDisplayName(d))}">
         <span class="nav-ico">${icon('drive')}</span>
         <div class="nav-text">
           <span>${escapeHtml(driveDisplayName(d))}</span>
@@ -88,7 +103,7 @@ function renderDriveGrid() {
     return;
   }
   grid.innerHTML = drivesData.map(d => `
-    <div class="drive-card" data-path="${escapeHtml(d.path)}" data-kind="drive" onclick="openDrive('${d.path.replace(/\\/g, '\\\\')}')" title="${escapeHtml(d.typeName)}${d.fileSystem ? ' · ' + d.fileSystem : ''} · 已用 ${formatFileSize(d.used)} · 可用 ${formatFileSize(d.free)}">
+    <div class="drive-card" data-path="${escapeHtml(d.path)}" data-kind="drive" onclick="openDrive('${jsStr(d.path)}')" title="${escapeHtml(d.typeName)}${d.fileSystem ? ' · ' + d.fileSystem : ''} · 已用 ${formatFileSize(d.used)} · 可用 ${formatFileSize(d.free)}">
       ${driveSvg()}
       <div class="drive-body">
         <div class="drive-name">${escapeHtml(driveDisplayName(d))}</div>
@@ -459,7 +474,7 @@ function renderBreadcrumb(fullPath) {
     if (i === parts.length - 1) {
       html += `<span class="current">${escapeHtml(part)}</span>`;
     } else {
-      html += `<a href="#" onclick="loadDirectory('${accum.replace(/\\/g, '\\\\')}');return false;">${escapeHtml(part)}</a><span class="sep">›</span>`;
+      html += `<a href="#" onclick="loadDirectory('${jsStr(accum)}');return false;">${escapeHtml(part)}</a><span class="sep">›</span>`;
     }
   });
   bc.innerHTML = html;
@@ -516,6 +531,7 @@ function sortSimple(list) {
     if (sortBy === 'name') return collator.compare(a.name, b.name) * mul;
     if (sortBy === 'time') return ((a.mtime || 0) - (b.mtime || 0)) * mul;
     if (sortBy === 'size') return ((a.size || 0) - (b.size || 0)) * mul;
+    if (sortBy === 'type') return collator.compare(entryTypeName(a), entryTypeName(b)) * mul;
     return 0;
   });
 }
@@ -854,8 +870,8 @@ function renderFolders(folders) {
   section.style.display = 'block';
   grid.innerHTML = folders.map(f => `
     <div class="folder-item" data-path="${escapeHtml(f.path)}" data-kind="folder"
-         onclick="iconClick(event,'${f.path.replace(/\\/g, '\\\\')}')"
-         ondblclick="openEntryPath('${f.path.replace(/\\/g, '\\\\')}')">
+         onclick="iconClick(event,'${jsStr(f.path)}')"
+         ondblclick="openEntryPath('${jsStr(f.path)}')">
       ${folderSvg()}
       <div class="folder-name">${escapeHtml(f.name)}</div>
     </div>`).join('');
@@ -869,7 +885,7 @@ function renderImages(images) {
   section.style.display = 'block';
   grid.innerHTML = images.map((img, index) => `
     <div class="media-item" data-path="${escapeHtml(img.path)}" data-kind="image" title="${escapeHtml(img.name)}"
-         onclick="iconClick(event,'${img.path.replace(/\\/g, '\\\\')}')"
+         onclick="iconClick(event,'${jsStr(img.path)}')"
          ondblclick="openImage(${index})">
       <img data-src="/api/thumbnail/image?path=${encodeURIComponent(img.path)}" alt="${escapeHtml(img.name)}">
     </div>`).join('');
@@ -884,7 +900,7 @@ function renderVideos(videos) {
   section.style.display = 'block';
   grid.innerHTML = videos.map((v, index) => `
     <div class="media-item" data-path="${escapeHtml(v.path)}" data-kind="video" title="${escapeHtml(v.name)}"
-         onclick="iconClick(event,'${v.path.replace(/\\/g, '\\\\')}')"
+         onclick="iconClick(event,'${jsStr(v.path)}')"
          ondblclick="openVideo(${index})">
       <img data-src="/api/thumbnail/video?path=${encodeURIComponent(v.path)}" alt="${escapeHtml(v.name)}">
       <div class="video-badge">▶</div>
@@ -899,8 +915,8 @@ function renderOthers(others) {
   section.style.display = 'block';
   grid.innerHTML = others.map(f => `
     <div class="other-item" data-path="${escapeHtml(f.path)}" data-kind="file"
-         onclick="iconClick(event,'${f.path.replace(/\\/g, '\\\\')}')"
-         ondblclick="openEntryPath('${f.path.replace(/\\/g, '\\\\')}')">
+         onclick="iconClick(event,'${jsStr(f.path)}')"
+         ondblclick="openEntryPath('${jsStr(f.path)}')">
       <div class="other-icon">${fileIconHtml(f.name)}</div>
       <div class="other-info">
         <div class="other-name">${escapeHtml(f.name)}</div>

@@ -19,6 +19,9 @@
       <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.6 12a7.6 7.6 0 1 1-2.2-5.4"/><path d="M19.6 4.6v5h-5"/></symbol>
       <symbol id="i-view-details" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></symbol>
       <symbol id="i-view-icons" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.4"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.4"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.4"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="1.8"/><circle cx="9" cy="10" r="1.6"/><path d="M4.5 17l4.3-4.3 3 3 3.2-3.2 4.5 4.5"/></symbol>
+      <symbol id="i-log" viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="17" rx="1.6"/><path d="M8 8h8M8 11.5h8M8 15h5"/></symbol>
+      <symbol id="i-scan" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.2"/><path d="M15.2 15.2L20 20"/><path d="M10.5 7.8v2.9l2 1.3"/></symbol>
       <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M3.5 16.5L7 20l3.5-3.5"/><path d="M17 20V4M13.5 7.5L17 4l3.5 3.5"/></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.7-5 2.7.9-5.6-4-3.9 5.6-.8z"/></symbol>
       <symbol id="i-memo" viewBox="0 0 24 24"><path d="M5.5 4h13a1 1 0 0 1 1 1v8.5L14 19H5.5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M19.5 13.5H15a1 1 0 0 0-1 1V19"/></symbol>
@@ -141,6 +144,15 @@
         <div class="menu-item" onclick="openMemoPanel();closeMenu()">
           <svg class="gi menu-icon"><use href="#i-memo"/></svg><span>备忘录</span>
         </div>
+        <div class="menu-item" onclick="openPhotosPanel();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-image"/></svg><span>生活区照片</span>
+        </div>
+        <div class="menu-item" onclick="openLogPanel();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-log"/></svg><span>操作日志</span>
+        </div>
+        <div class="menu-item" onclick="openCleanPanel();closeMenu()">
+          <svg class="gi menu-icon"><use href="#i-scan"/></svg><span>空间清理</span>
+        </div>
         <div class="menu-item theme-picker-item">
           <svg class="gi menu-icon"><use href="#i-palette"/></svg><span>主题色</span>
           <div class="theme-colors" id="theme-colors">
@@ -255,6 +267,7 @@
 
   <input type="file" id="file-upload" multiple style="display:none" onchange="handleFileSelect(this.files)">
   <input type="file" id="folder-upload" webkitdirectory directory multiple style="display:none" onchange="handleFolderSelect(this.files)">
+  <input type="file" id="photo-upload" accept="image/*" multiple style="display:none" onchange="handlePhotoSelect(this.files)">
 
   <div class="drop-overlay" id="drop-overlay">
     <div class="drop-content">
@@ -266,7 +279,18 @@
   <div class="upload-panel" id="upload-panel">
     <div class="upload-header">
       <span id="upload-title">上传文件</span>
-      <button class="close-btn" onclick="closeUploadPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
+      <div class="upload-header-right">
+        <label class="upload-concurrency" title="同时上传的文件数">
+          并发
+          <select id="upload-concurrency" onchange="setUploadConcurrency(this.value)">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <button class="close-btn" onclick="closeUploadPanel()" title="收起面板（上传会在后台继续）"><svg class="gi"><use href="#i-close"/></svg></button>
+      </div>
     </div>
     <div class="upload-file-list" id="upload-file-list"></div>
     <div class="upload-progress-container" id="upload-progress-container" style="display:none">
@@ -279,6 +303,13 @@
       <button class="upload-cancel-btn" id="upload-cancel-btn" onclick="cancelUpload()">取消</button>
       <button class="upload-confirm-btn" id="upload-confirm-btn" onclick="confirmUpload()">开始上传</button>
     </div>
+  </div>
+
+  <!-- 上传中收起面板后的后台进度胶囊 -->
+  <div class="upload-mini" id="upload-mini" onclick="showUploadPanel()" title="上传中，点击查看详情">
+    <svg class="gi"><use href="#i-upload"/></svg>
+    <span id="upload-mini-text">上传中…</span>
+    <span class="upload-mini-bar"><i id="upload-mini-fill"></i></span>
   </div>
 
   <div class="favorites-panel trash-panel" id="trash-panel">
@@ -322,6 +353,52 @@
       </div>
     </div>
     <div class="memo-list" id="memo-list"></div>
+  </div>
+
+  <div class="favorites-panel photos-panel" id="photos-panel">
+    <div class="favorites-header">
+      <span><svg class="gi"><use href="#i-image"/></svg> 生活区照片</span>
+      <button class="close-btn" onclick="closePhotosPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
+    </div>
+    <div class="photo-grid" id="photo-grid"></div>
+    <button class="add-favorite-btn" onclick="triggerPhotoUpload()">+ 上传照片</button>
+  </div>
+
+  <div class="favorites-panel log-panel" id="log-panel">
+    <div class="favorites-header">
+      <span><svg class="gi"><use href="#i-log"/></svg> 操作日志</span>
+      <div class="memo-panel-actions">
+        <button class="memo-panel-add" onclick="loadOperationLogs()">刷新</button>
+        <button class="close-btn" onclick="closeLogPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="log-list" id="log-list"></div>
+  </div>
+
+  <div class="favorites-panel clean-panel" id="clean-panel">
+    <div class="favorites-header">
+      <span><svg class="gi"><use href="#i-scan"/></svg> 空间清理</span>
+      <div class="memo-panel-actions">
+        <button class="memo-panel-add" id="clean-start-btn" onclick="toggleCleanScan()">开始扫描</button>
+        <button class="close-btn" onclick="closeCleanPanel()"><svg class="gi"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+    <div class="clean-controls">
+      <label class="clean-row"><span>模式</span>
+        <select id="clean-mode" onchange="onCleanModeChange()">
+          <option value="large">大文件</option>
+          <option value="duplicate">重复文件</option>
+        </select>
+      </label>
+      <label class="clean-row"><span>最小文件</span>
+        <span class="clean-size"><input type="number" id="clean-min" min="1" max="10240" value="100"> MB</span>
+      </label>
+      <div class="clean-scope" id="clean-scope">范围：—</div>
+    </div>
+    <div class="clean-progress" id="clean-progress" style="display:none">
+      <span class="clean-progress-text" id="clean-progress-text">准备中…</span>
+    </div>
+    <div class="clean-list" id="clean-list"></div>
   </div>
 
   <div class="memo-editor-overlay" id="memo-editor-overlay">
