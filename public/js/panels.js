@@ -649,7 +649,10 @@ function clearCompareSelection() {
 async function openCompareSelection() {
   const paths = [...cleanComparePaths];
   if (paths.length < 2) return;
+  await runCompare(paths);
+}
 
+async function runCompare(paths) {
   closeCompareViewer();
   const title = paths.length === 2 ? '精确对比两个文件' : `批量对比 ${paths.length} 个文件`;
   showModal({
@@ -677,12 +680,46 @@ async function openCompareSelection() {
   }
 }
 
+// 对比结果里直接删除（移到回收站），然后用剩余文件重新对比
+async function deleteCompareFile(path, name) {
+  if (!confirm(`确定删除「${name}」吗？文件会移到回收站，可在回收站还原。`)) return;
+
+  const r = await deletePaths([path]);
+  if (!r.ok) return alert(r.error || '删除失败');
+  setUndoState(r.history);
+
+  cleanComparePaths.delete(path);
+  document.querySelectorAll('.clean-check').forEach(el => {
+    if (samePath(el.dataset.path, path)) el.checked = false;
+  });
+  updateCompareBar();
+  document.querySelectorAll('#clean-list [data-path]').forEach(el => {
+    if (samePath(el.dataset.path, path)) el.remove();
+  });
+
+  flashStatus(`已删除「${name}」，已移到回收站`);
+
+  const remaining = [...cleanComparePaths];
+  if (remaining.length >= 2) {
+    await runCompare(remaining);
+  } else {
+    closeModal();
+    if (remaining.length === 1) flashStatus('已删除；剩余文件不足 2 个，无法继续对比');
+  }
+}
+
+function cmpDeleteBtn(f) {
+  return `<button class="cmp-del" title="移到回收站"
+    onclick="event.stopPropagation();deleteCompareFile('${jsStr(f.path)}','${jsStr(f.name)}')">${icon('trash')}</button>`;
+}
+
 function cmpHash(hash) {
   return `<span class="cmp-hash" title="${escapeHtml(hash)}">SHA-256 ${escapeHtml(String(hash).slice(0, 16))}…</span>`;
 }
 
 function cmpCard(f, label) {
   return `<div class="cmp-card">
+    ${cmpDeleteBtn(f)}
     <div class="cmp-label">${label}</div>
     ${cmpMediaHtml(f)}
     <div class="cmp-name">${escapeHtml(f.name)}</div>
@@ -738,6 +775,7 @@ function cmpBatchFileHtml(f) {
       <span class="cmp-file-name">${escapeHtml(f.name)}</span>
       <span class="cmp-file-dir">${escapeHtml(parentDirOf(f.path))}</span>
     </div>
+    ${cmpDeleteBtn(f)}
   </div>`;
 }
 

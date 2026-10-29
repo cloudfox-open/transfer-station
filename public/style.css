@@ -1836,13 +1836,14 @@ body.compact .status-bar { height: 22px; }
 .cmp-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 640px) { .cmp-cards { grid-template-columns: 1fr; } }
 .cmp-card {
+  position: relative;
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--card);
 }
-.cmp-label { margin-bottom: 4px; font-size: 11px; color: var(--text-tertiary); }
+.cmp-label { margin-bottom: 4px; padding-right: 30px; font-size: 11px; color: var(--text-tertiary); }
 .cmp-name { font-size: 13px; font-weight: 600; word-break: break-all; }
 .cmp-path { margin-top: 3px; font-size: 11px; color: var(--text-secondary); word-break: break-all; }
 .cmp-meta { margin-top: 6px; font-size: 11px; color: var(--text-tertiary); }
@@ -1958,6 +1959,32 @@ body.compact .status-bar { height: 22px; }
 }
 .cmp-file-name { display: block; font-size: 12px; word-break: break-all; }
 .cmp-file-dir { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-tertiary); word-break: break-all; }
+
+/* 对比结果里的删除按钮 */
+.cmp-del {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.cmp-del:hover {
+  color: var(--danger);
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+.cmp-del .gi { width: 14px; height: 14px; }
+.cmp-card .cmp-del {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
 
 /* 对比媒体查看器（图片 / 视频，左右切换） */
 .cmp-viewer {
