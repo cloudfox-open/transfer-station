@@ -1122,6 +1122,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .clean-file-name { display: block; font-size: 12px; word-break: break-all; }
 .clean-file-meta { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-tertiary); word-break: break-all; }
 
+/* 从扫描结果定位到文件时的高亮闪烁 */
+@keyframes revealFlash {
+  0%, 100% { background-color: transparent; box-shadow: inset 0 0 0 0 transparent; }
+  12%, 62% { background-color: var(--primary-soft); box-shadow: inset 0 0 0 2px var(--primary); }
+}
+[data-path].reveal-flash {
+  border-radius: var(--radius-sm);
+  animation: revealFlash 1.8s ease;
+}
+
 .memo-editor-overlay {
   position: fixed;
   inset: 0;

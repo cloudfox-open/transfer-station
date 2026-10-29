@@ -540,9 +540,9 @@ function renderCleanResult(job) {
       return;
     }
     box.innerHTML = `
-      <div class="clean-summary">找到 ${r.totalCount} 个大文件，共 ${formatFileSize(r.totalBytes)}${r.truncated ? '（已达上限，结果被截断）' : ''}</div>
+      <div class="clean-summary">找到 ${r.totalCount} 个大文件，共 ${formatFileSize(r.totalBytes)}${r.truncated ? '（已达上限，结果被截断）' : ''}<br>点击条目会打开所在目录并选中该文件</div>
       ${r.files.map(f => `
-        <div class="clean-item" title="${escapeHtml(f.path)}" onclick="openCleanLocation('${jsStr(parentDirOf(f.path))}')">
+        <div class="clean-item" title="${escapeHtml(f.path)}" onclick="revealCleanFile('${jsStr(f.path)}')">
           <div class="clean-name">${escapeHtml(f.name)}</div>
           <div class="clean-meta">${escapeHtml(parentDirOf(f.path))}</div>
           <span class="clean-size">${formatFileSize(f.size)}</span>
@@ -555,12 +555,12 @@ function renderCleanResult(job) {
     return;
   }
   box.innerHTML = `
-    <div class="clean-summary">发现 ${r.groupCount} 组重复，多出 ${r.duplicateCount} 个副本，可释放 ${formatFileSize(r.wastedTotal)}${r.truncated ? '（已达上限，结果被截断）' : ''}</div>
+    <div class="clean-summary">发现 ${r.groupCount} 组重复，多出 ${r.duplicateCount} 个副本，可释放 ${formatFileSize(r.wastedTotal)}${r.truncated ? '（已达上限，结果被截断）' : ''}<br>点击任意副本会打开所在目录并选中该文件</div>
     ${r.groups.map(g => `
       <div class="clean-group">
         <div class="clean-group-head"><span>${g.count} 份 · 每份 ${formatFileSize(g.size)}</span><b>可释放 ${formatFileSize(g.wasted)}</b></div>
         ${g.files.map((p, i) => `
-          <div class="clean-file" title="${escapeHtml(p)}" onclick="openCleanLocation('${jsStr(parentDirOf(p))}')">
+          <div class="clean-file" title="${escapeHtml(p)}" onclick="revealCleanFile('${jsStr(p)}')">
             <span class="clean-file-name">${i === 0 ? '保留' : '副本'} · ${escapeHtml(baseNameOf(p))}</span>
             <span class="clean-file-meta">${escapeHtml(parentDirOf(p))}</span>
           </div>`).join('')}
@@ -573,8 +573,29 @@ function parentDirOf(p) {
   return d || s;
 }
 
-function openCleanLocation(dir) {
+// 打开文件所在目录，选中该文件并滚动到可见位置
+async function revealCleanFile(filePath) {
+  if (!filePath) return;
+  const parent = parentDirOf(filePath);
   closeCleanPanel();
-  loadDirectory(dir);
+
+  if (searchMode || currentView !== 'files' || !samePath(parent, currentPath)) {
+    const ok = await loadDirectory(parent);
+    if (!ok) return;
+  }
+
+  setSelection([filePath]);
+
+  const row = [...document.querySelectorAll('[data-path]')]
+    .find(el => samePath(el.dataset.path, filePath));
+  if (!row) {
+    flashStatus('目录已打开，但没有找到这个文件（可能已被移动或删除）');
+    return;
+  }
+
+  row.scrollIntoView({ block: 'center' });
+  row.classList.add('reveal-flash');
+  setTimeout(() => row.classList.remove('reveal-flash'), 1800);
+  flashStatus(`已定位「${baseNameOf(filePath)}」`);
 }
 
